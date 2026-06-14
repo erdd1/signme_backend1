@@ -1,0 +1,39 @@
+<?php
+
+namespace App\Modules\Auth\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Http\Exceptions\HttpResponseException;
+
+class VerifyPasswordResetOTPRequest extends FormRequest
+{
+    public function authorize(): bool { return true; }
+
+    public function rules(): array
+    {
+        return [
+            'email' => ['required', 'email'],
+            'otp'   => ['required', 'digits:6'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'email.required' => 'L\'adresse email est obligatoire.',
+            'email.email'    => 'Email invalide.',
+            'otp.required'   => 'Le code OTP est obligatoire.',
+            'otp.digits'     => 'Le code doit contenir 6 chiffres.',
+        ];
+    }
+
+    protected function failedValidation(Validator $validator): void
+    {
+        throw new HttpResponseException(response()->json([
+            'success' => false,
+            'message' => 'Erreur de validation',
+            'errors'  => $validator->errors(),
+        ], 422));
+    }
+}

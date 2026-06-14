@@ -1,0 +1,401 @@
+{
+  "info": {
+    "_postman_id": "ancien-designation-test",
+    "name": "🧪 Anciens Désignation - Test Retrait",
+    "description": "Collection complète pour tester le retrait d'un ancien de service",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "🔵 1. CRÉER DÉSIGNATION - Jean Dupont (juin 2026)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ancien_id\": 5,\n  \"mois\": 6,\n  \"annee\": 2026,\n  \"jours_travail\": [1, 2, 3, 4, 5],\n  \"horaire_debut\": \"08:00\",\n  \"horaire_fin\": \"18:00\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ]
+        },
+        "description": "✅ Crée une désignation pour Jean (ancien ID 5)\n\nRésultat attendu:\n- HTTP 201\n- est_de_service = true\n- Copier l'ID de la réponse pour les prochaines étapes\n\nSauvegarder l'ID: data.id"
+      },
+      "response": []
+    },
+    {
+      "name": "🟢 2. VÉRIFIER AVANT RETRAIT - Liste des anciens",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations?mois=6&annee=2026",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ],
+          "query": [
+            {
+              "key": "mois",
+              "value": "6"
+            },
+            {
+              "key": "annee",
+              "value": "2026"
+            }
+          ]
+        },
+        "description": "✅ Liste les anciens désignés pour juin 2026\n\nRésultat attendu:\n- total_designes: 1\n- Jean est dans \"designes\"\n- est_designe: true\n\nVérifier la disponibilité affichée:\n- Jours: Lundi, Mardi, Mercredi, Jeudi, Vendredi\n- Horaires: 08:00 - 18:00"
+      },
+      "response": []
+    },
+    {
+      "name": "🟡 3. VÉRIFIER BASE DE DONNÉES - User est_de_service",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/users/5",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "users",
+            "5"
+          ]
+        },
+        "description": "✅ Vérifie l'état de Jean dans la table users\n\nRésultat attendu:\n- est_de_service: true"
+      },
+      "response": []
+    },
+    {
+      "name": "🔴 4. ⭐ RETIRER L'ANCIEN - DELETE Désignation",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations/{{DESIGNATION_ID}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations",
+            "{{DESIGNATION_ID}}"
+          ]
+        },
+        "description": "⭐ LE TEST PRINCIPAL: Retirer l'ancien de service\n\n🔴 IMPORTANT:\nRemplacer {{DESIGNATION_ID}} par l'ID copié à l'étape 1\n\nRésultat attendu:\n- HTTP 204 No Content\n- (pas de réponse body - c'est normal!)\n\nExemple:\n DELETE /api/v1/anciens-designations/42"
+      },
+      "response": []
+    },
+    {
+      "name": "🟢 5. VÉRIFIER APRÈS RETRAIT - Liste des anciens",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations?mois=6&annee=2026",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ],
+          "query": [
+            {
+              "key": "mois",
+              "value": "6"
+            },
+            {
+              "key": "annee",
+              "value": "2026"
+            }
+          ]
+        },
+        "description": "✅ Vérifie que Jean a été retiré de la liste\n\nRésultat attendu:\n- total_designes: 0 (était 1 avant)\n- designes: [] (liste vide)\n- Jean passe à \"non_designes\"\n- est_designe: false"
+      },
+      "response": []
+    },
+    {
+      "name": "🟡 6. VÉRIFIER BASE DE DONNÉES - User est_de_service FALSE",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/users/5",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "users",
+            "5"
+          ]
+        },
+        "description": "✅ Vérifie que Jean n'est plus de service\n\nRésultat attendu:\n- est_de_service: false (était true avant)\n\n✅ TEST RÉUSSI!"
+      },
+      "response": []
+    },
+    {
+      "name": "═══════════════════════════════════════════",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://www.example.com",
+          "protocol": "https",
+          "host": [
+            "www",
+            "example",
+            "com"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 1. Créer 2ème désignation (juillet)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ancien_id\": 5,\n  \"mois\": 7,\n  \"annee\": 2026,\n  \"jours_travail\": null,\n  \"horaire_debut\": null,\n  \"horaire_fin\": null\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ]
+        },
+        "description": "✅ Crée une 2ème désignation pour juillet\n\nScénario: Un ancien a 2 désignations\nMois: Juillet (24/7 cette fois)\n\nSauvegarder l'ID pour les étapes suivantes"
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 2a. Vérifier juin vide",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations?mois=6&annee=2026",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ],
+          "query": [
+            {
+              "key": "mois",
+              "value": "6"
+            },
+            {
+              "key": "annee",
+              "value": "2026"
+            }
+          ]
+        },
+        "description": "✅ Vérifie que juin n'a plus personne\n\nRésultat attendu:\n- total_designes: 0"
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 2b. Vérifier juillet avec Jean",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations?mois=7&annee=2026",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations"
+          ],
+          "query": [
+            {
+              "key": "mois",
+              "value": "7"
+            },
+            {
+              "key": "annee",
+              "value": "2026"
+            }
+          ]
+        },
+        "description": "✅ Vérifie que juillet a Jean\n\nRésultat attendu:\n- total_designes: 1\n- Jean est dans designes\n- est_designe: true"
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 2c. Vérifier est_de_service = true",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/users/5",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "users",
+            "5"
+          ]
+        },
+        "description": "✅ Vérifie que Jean est TOUJOURS de service\n\nRésultat attendu:\n- est_de_service: true (car il a encore la désignation de juillet)"
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 3. Retirer 2ème désignation (juillet)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/anciens-designations/{{DESIGNATION_ID_2}}",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "anciens-designations",
+            "{{DESIGNATION_ID_2}}"
+          ]
+        },
+        "description": "🔴 Retirer la 2ème désignation de juillet\n\nRésultat attendu:\n- HTTP 204"
+      },
+      "response": []
+    },
+    {
+      "name": "🟣 TEST AVANCÉ 4. Vérifier est_de_service = false",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{BEARER_TOKEN}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/users/5",
+          "host": [
+            "{{BASE_URL}}"
+          ],
+          "path": [
+            "users",
+            "5"
+          ]
+        },
+        "description": "✅ Vérifie que Jean n'est PLUS de service\n\nRésultat attendu:\n- est_de_service: false (maintenant qu'il n'a plus aucune désignation)\n\n🎉 TEST AVANCÉ RÉUSSI!"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "BEARER_TOKEN",
+      "value": "YOUR_PASTEUR_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "DESIGNATION_ID",
+      "value": "42",
+      "type": "string"
+    },
+    {
+      "key": "DESIGNATION_ID_2",
+      "value": "43",
+      "type": "string"
+    }
+  ]
+}

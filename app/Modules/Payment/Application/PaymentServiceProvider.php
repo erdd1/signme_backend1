@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Modules\Payment\Application;
+
+use App\Modules\Payment\Domain\PaymentRepositoryInterface;
+use App\Modules\Payment\Infrastructure\PaymentRepository;
+use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
+use Illuminate\Support\ServiceProvider;
+
+/**
+ * Class PaymentServiceProvider
+ * 
+ * Service Provider pour la configuration du module Payment
+ * Enregistre les bindings et la configuration
+ */
+class PaymentServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        // Enregistrer le repository dans le conteneur DI
+        $this->app->bind(
+            PaymentRepositoryInterface::class,
+            PaymentRepository::class
+        );
+
+        // Enregistrer Campay Gateway comme singleton
+        $this->app->singleton(CampayGateway::class, function () {
+            return new CampayGateway();
+        });
+
+        // Enregistrer PaymentService
+        $this->app->bind(PaymentService::class, function ($app) {
+            return new PaymentService(
+                $app->make(PaymentRepositoryInterface::class),
+                $app->make(CampayGateway::class),
+            );
+        });
+    }
+
+    public function boot(): void
+    {
+        $this->mergeConfigFrom(base_path('config/payment.php'), 'payment');
+    }
+}

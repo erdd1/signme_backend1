@@ -1,0 +1,335 @@
+===============================================================================
+🧪 TEST POSTMAN - RETIRER UN ANCIEN DE SERVICE
+===============================================================================
+
+Protocole: HTTP/REST
+Base URL: http://localhost:8000/api/v1
+Authorization: Bearer (Token du Pasteur)
+
+===============================================================================
+PRÉPARATION
+===============================================================================
+
+1. Obtenir votre Bearer Token (si vous l'avez pas)
+   
+   POST http://localhost:8000/api/v1/auth/login
+   Content-Type: application/json
+   
+   {
+     "email": "pasteur@email.com",
+     "password": "votre_password"
+   }
+   
+   ✅ Copier la valeur de response.data.token
+
+2. Dans Postman:
+   - Aller à l'onglet "Authorization"
+   - Type: Bearer Token
+   - Token: <coller votre token>
+   
+===============================================================================
+ÉTAPE 1: CRÉER UNE DÉSIGNATION
+===============================================================================
+
+Endpoint: POST /api/v1/anciens-designations
+
+Body (JSON):
+{
+  "ancien_id": 5,
+  "mois": 6,
+  "annee": 2026,
+  "jours_travail": [1, 2, 3, 4, 5],
+  "horaire_debut": "08:00",
+  "horaire_fin": "18:00"
+}
+
+✅ Réponse 201 Created:
+{
+  "success": true,
+  "message": "Ancien désigné de service avec succès.",
+  "data": {
+    "id": 42,                                    ← 🔴 COPIER CET ID
+    "ancienId": 5,
+    "ancienNom": "Jean Dupont",
+    "egliseId": 1,
+    "mois": 6,
+    "annee": 2026,
+    "jours_travail": [1, 2, 3, 4, 5],
+    "horaire_debut": "08:00",
+    "horaire_fin": "18:00",
+    "date_fin_service": "2026-06-30 23:59:59",  ← Auto-généré
+    "designePar": 2,
+    "designeParNom": "Pasteur Marchal",
+    "created_at": "2026-04-25T10:30:00Z",
+    "updated_at": "2026-04-25T10:30:00Z"
+  }
+}
+
+✅ Vérifier: est_de_service = true
+   GET /api/v1/users/5
+   → Vérifier: "est_de_service": true
+
+===============================================================================
+ÉTAPE 2: LISTER LES ANCIENS AVANT RETRAIT
+===============================================================================
+
+Endpoint: GET /api/v1/anciens-designations?mois=6&annee=2026
+
+✅ Réponse 200 OK:
+{
+  "success": true,
+  "message": "Désignations récupérées avec succès.",
+  "data": {
+    "mois": 6,
+    "annee": 2026,
+    "eglise_id": 1,
+    "designes": [
+      {
+        "id": 5,
+        "nom": "Jean Dupont",
+        "photoUrl": "...",
+        "telephone": "...",
+        "est_designe": true,
+        "jours_travail": [1, 2, 3, 4, 5],
+        "horaire_debut": "08:00",
+        "horaire_fin": "18:00",
+        "disponibilite": {
+          "jours": "Lundi, Mardi, Mercredi, Jeudi, Vendredi",
+          "horaires": "08:00 - 18:00",
+          "resume": "Disponible: Lundi, Mardi, Mercredi, Jeudi, Vendredi (08:00 - 18:00)"
+        }
+      }
+    ],
+    "non_designes": [...],
+    "total_designes": 1
+  }
+}
+
+📝 Noter: total_designes = 1 (AVANT retrait)
+
+===============================================================================
+ÉTAPE 3: ⭐ RETIRER L'ANCIEN (LE TEST PRINCIPAL)
+===============================================================================
+
+Endpoint: DELETE /api/v1/anciens-designations/42
+           (remplacer 42 par l'ID copié à l'ÉTAPE 1)
+
+No Body needed
+
+✅ Réponse 204 No Content:
+   (response vide - c'est normal!)
+
+Headers réponse:
+   Status Code: 204 No Content
+   Content-Length: 0
+
+✨ MESSAGE: "Désignation retirée avec succès. L'ancien n'est plus de service."
+
+===============================================================================
+ÉTAPE 4: VÉRIFIER APRÈS RETRAIT - LISTE ANCIENS
+===============================================================================
+
+Endpoint: GET /api/v1/anciens-designations?mois=6&annee=2026
+
+✅ Réponse 200 OK:
+{
+  "success": true,
+  "message": "Désignations récupérées avec succès.",
+  "data": {
+    "mois": 6,
+    "annee": 2026,
+    "eglise_id": 1,
+    "designes": [],           ← 🔴 EMPTY MAINTENANT!
+    "non_designes": [
+      {
+        "id": 5,
+        "nom": "Jean Dupont",
+        "photoUrl": "...",
+        "telephone": "...",
+        "est_designe": false   ← changé de true à false
+      }
+    ],
+    "total_designes": 0       ← 🔴 0 au lieu de 1
+  }
+}
+
+📝 Vérification:
+   ✅ total_designes: 0 (au lieu de 1)
+   ✅ Jean passe de "designes" à "non_designes"
+   ✅ est_designe: false
+
+===============================================================================
+ÉTAPE 5: VÉRIFIER LA BASE DE DONNÉES
+===============================================================================
+
+Endpoint: GET /api/v1/users/5
+
+✅ Réponse 200 OK:
+{
+  "success": true,
+  "message": "Utilisateur récupéré avec succès.",
+  "data": {
+    "id": 5,
+    "nom": "Jean Dupont",
+    "email": "jean@email.com",
+    "role": "ancien",
+    "churchId": 1,
+    "actif": true,
+    "est_de_service": false,    ← 🔴 FALSE maintenant!
+    "photoUrl": "...",
+    "telephone": "...",
+    ...
+  }
+}
+
+✅ Vérification: est_de_service = false
+
+===============================================================================
+TEST AVANCÉ: PLUSIEURS DÉSIGNATIONS
+===============================================================================
+
+Scénario:
+- Un même ancien a 2 désignations (juin + juillet)
+- On retire seulement celle de juin
+- L'ancien devrait RESTER de service (car il en a une autre)
+- Puis on retire celle de juillet
+- L'ancien devient finalement NON de service
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 1: Créer 2 désignations
+
+POST /api/v1/anciens-designations
+{
+  "ancien_id": 5,
+  "mois": 6,
+  "annee": 2026,
+  "jours_travail": null,
+  "horaire_debut": null,
+  "horaire_fin": null
+}
+✅ Copier ID: 42
+
+POST /api/v1/anciens-designations
+{
+  "ancien_id": 5,
+  "mois": 7,
+  "annee": 2026,
+  "jours_travail": null,
+  "horaire_debut": null,
+  "horaire_fin": null
+}
+✅ Copier ID: 43
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 2: Vérifier l'état AVANT
+
+GET /api/v1/users/5
+
+✅ est_de_service = true
+✅ Vérifié dans anciens-designations:
+   - Juin: 1 ancien
+   - Juillet: 1 ancien
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 3: Retirer la 1ère désignation (juin)
+
+DELETE /api/v1/anciens-designations/42
+
+✅ Réponse 204
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 4: Vérifier APRÈS retrait de la 1ère
+
+GET /api/v1/anciens-designations?mois=6&annee=2026
+
+✅ total_designes = 0 (juin n'a plus personne)
+
+GET /api/v1/anciens-designations?mois=7&annee=2026
+
+✅ total_designes = 1 (juillet a toujours Jean)
+
+GET /api/v1/users/5
+
+✅ est_de_service = TRUE ✅ (TOUJOURS true car il a la désignation de juillet)
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 5: Retirer la 2ème désignation (juillet)
+
+DELETE /api/v1/anciens-designations/43
+
+✅ Réponse 204
+
+───────────────────────────────────────────────────────────────────────────
+
+ÉTAPE 6: Vérifier APRÈS retrait de la 2ème
+
+GET /api/v1/anciens-designations?mois=7&annee=2026
+
+✅ total_designes = 0 (juillet aussi vide)
+
+GET /api/v1/users/5
+
+✅ est_de_service = FALSE ✅ (MAINTENANT false car plus de désignation)
+
+===============================================================================
+VÉRIFICATION FINALE
+===============================================================================
+
+Tous les checks à faire:
+
+✅ Étape 1: Désignation créée
+   - Response 201
+   - ID copié
+
+✅ Étape 2: Avant retrait
+   - Liste montre l'ancien
+   - total_designes = 1
+
+✅ Étape 3: DELETE réussi
+   - Response 204 No Content
+
+✅ Étape 4: Après retrait
+   - Liste vide (total_designes = 0)
+   - Ancien passe à "non_designes"
+
+✅ Étape 5: DB vérifié
+   - est_de_service = false
+
+✅ Test avancé:
+   - Ancien reste de service après retrait d'une désignation
+   - Ancien devient NON de service après retrait de TOUTES les désignations
+
+===============================================================================
+RÉSUMÉ STATUS
+===============================================================================
+
+Status Code 204 = ✅ SUCCESS (pas d'erreur)
+est_de_service: true → false = ✅ Correct
+total_designes: 1 → 0 = ✅ Correct
+
+🎉 TOUT EST OK!
+
+===============================================================================
+TROUBLESHOOTING
+===============================================================================
+
+❌ Erreur 404: Not Found
+   → L'ID n'existe pas. Vérifier l'ID copié à l'ÉTAPE 1
+
+❌ Erreur 403: Forbidden
+   → Vous n'êtes pas pasteur/admin de cette église
+   → Vérifier le Bearer Token
+
+❌ Erreur 422: Validation Error
+   → ID doit être un integer (ex: 42 au lieu de "42")
+
+❌ est_de_service reste TRUE
+   → L'ancien a d'autres désignations actives
+   → Vérifier avec GET anciens-designations pour les autres mois
+
+===============================================================================

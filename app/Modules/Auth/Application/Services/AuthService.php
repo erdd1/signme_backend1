@@ -1,0 +1,551 @@
+<?php
+
+namespace App\Modules\Auth\Application\Services;
+
+use App\Models\User;
+use App\Modules\Auth\Domain\AuthEntity;
+use App\Core\Exceptions\ApiException;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use Illuminate\Auth\Events\PasswordReset;
+
+/**
+ * Service d'authentification — couche Application
+ *
+ * Gère toute la logique métier liée à l'authentification :
+ * - Connexion / déconnexion avec tokens sécurisés
+ * - Réinitialisation de mot de passe
+ * - Profil courant
+ * - Rate limiting et blocage temporaire
+ * - Journalisation sécurité
+ *
+ * NB : L'inscription classique n'est PAS fournie car les comptes
+ * sont créés exclusivement par un admin/pasteur/secrétaire.
+ *
+ * PHASE 1 SÉCURITÉ :
+ * ✅ Access token court (30 min)
+ * ✅ Refresh token long (7 jours) avec rotation
+ * ✅ Rate limiting + blocage temporaire
+ * ✅ Logs sécurité sanitizés
+ */
+class AuthService
+{
+    public function __construct(
+        private readonly RefreshTokenService $refreshTokenService,
+        private readonly RateLimitService $rateLimitService,
+        private readonly SecurityLogService $securityLogService,
+        private readonly MFAService $mfaService,
+        private readonly DeviceManagementService $deviceManagementService,
+        private readonly SuspiciousActivityDetectionService $suspiciousActivityService,
+        private readonly SecurityNotificationService $notificationService,
+        private readonly PasswordResetOTPService $passwordResetOTPService,
+    ) {}
+
+    /**
+     * Authentifie un utilisateur et retourne access token + refresh token.
+     *
+     * PHASE 1 : Implémente rotation refresh tokens + rate limiting.
+     * PHASE 2 : Intègre MFA si activé, device tracking, détection activités suspectes.
+     *
+     * @param string $email
+     * @param string $password
+     * @param string|null $deviceInfo Device ID du mobile (pour tracking)
+     * @param string|null $otp Code OTP si MFA activé (PHASE 2)
+     * @return AuthEntity
+     * @throws ApiException
+     */
+    public function login(string $email, string $password, ?string $deviceInfo = null, ?string $otp = null): AuthEntity
+    {
+        $ipAddress = request()->ip();
+        $rateKey     = strtolower($email) . '|' . $ipAddress;
+
+        // ─── 1. VÉRIFIER RATE LIMITING ───────────────────────────────────
+
+        $this->rateLimitService->ensureWithinLimit('login', $rateKey);
+
+        if ($this->rateLimitService->isLoginBlocked($email, $ipAddress)) {
+            $blockingInfo = $this->rateLimitService->getBlockingInfo($email, $ipAddress);
+            $minutes      = $blockingInfo['remaining_minutes'] ?? 1;
+
+            $this->securityLogService->logLoginBlocked($email, $minutes);
+
+            throw ApiException::tooManyRequests(
+                'Trop de tentatives échouées. Réessayez dans ' . $minutes . ' minute(s).',
+                ['retry_after' => $minutes * 60]
+            );
+        }
+
+        // ─── 2. VÉRIFIER LES IDENTIFIANTS ────────────────────────────────
+
+        $user = User::where('email', $email)->first();
+
+        if (!$user || !Hash::check($password, $user->password)) {
+            $blockingResult = $this->rateLimitService->recordFailedLogin(
+                $email,
+                $ipAddress,
+                request()->header('User-Agent')
+            );
+
+            $this->rateLimitService->incrementRateLimit('login', $rateKey);
+            $this->securityLogService->logFailedLogin($email, 'invalid_credentials');
+
+            if ($blockingResult['is_blocked']) {
+                $minutes = $blockingResult['remaining_minutes'] ?? 1;
+                throw ApiException::tooManyRequests(
+                    'Trop de tentatives échouées. Réessayez dans ' . $minutes . ' minute(s).',
+                    ['retry_after' => $minutes * 60]
+                );
+            }
+
+            throw ApiException::unauthorized('Identifiants invalides.');
+        }
+
+        // ─── 3. VÉRIFIER LE COMPTE EST ACTIF ──────────────────────────────
+
+        if (!$user->actif) {
+            $this->securityLogService->logFailedLogin($email, 'account_inactive');
+
+            throw ApiException::forbidden(
+                'Votre compte a été désactivé. Contactez votre pasteur ou l\'administrateur.'
+            );
+        }
+
+        // ─── 3b. VÉRIFIER LE RÔLE — administrateurs ne peuvent pas utiliser le client mobile ────────
+
+        if ($user->role === 'administrateur') {
+            $this->securityLogService->logFailedLogin(
+                $email,
+                'unauthorized_role_' . $user->role
+            );
+
+            throw ApiException::forbidden(
+                'Accès refusé. L\'administrateur doit utiliser l\'interface web. '
+                . 'Autres rôles autorisés: paroissien, ancien, pasteur, secrétaire, trésorier.'
+            );
+        }
+
+        // ─── 4. VÉRIFIER MFA SI ACTIVÉ (PHASE 2) ────────────────────────
+
+        if ($this->mfaService->isMFAEnabled($user)) {
+            if (!$otp) {
+                throw ApiException::unauthorized(
+                    'Authentification à deux facteurs requise. Veuillez fournir le code OTP.',
+                    ['mfa_required' => true]
+                );
+            }
+
+            // Vérifier l'OTP
+            if (!$this->mfaService->verifySecondFactor($user, $otp)) {
+                $this->securityLogService->log(
+                    'mfa_verification_failed',
+                    'failed',
+                    $user,
+                    ['reason' => 'invalid_otp']
+                );
+
+                throw ApiException::unauthorized('Code OTP invalide ou expiré.');
+            }
+        }
+
+        // ─── 5. DÉTECTER ACTIVITÉS SUSPECTES (PHASE 2) ──────────────────
+
+        $suspiciousActivities = $this->suspiciousActivityService->analyzeLogin(
+            $user,
+            $ipAddress,
+            $deviceInfo
+        );
+
+        // ─── 6. ENREGISTRER L'APPAREIL (PHASE 2) ────────────────────────
+
+        $this->deviceManagementService->registerDevice($user, $deviceInfo, [
+            'ip_address' => $ipAddress,
+        ]);
+
+        // ─── 7. CRÉER L'ACCESS TOKEN COURT (30 min) ──────────────────────
+
+        $accessToken = $user->createToken(
+            'eec_signcard_' . $user->role,
+            ['*'],
+            now()->addMinutes(config('security.tokens.access_token_expires_in_minutes'))
+        )->plainTextToken;
+
+        // ─── 8. CRÉER REFRESH TOKEN (avec rotation) ──────────────────────
+
+        $refreshToken = $this->refreshTokenService->createRefreshToken(
+            $user,
+            $deviceInfo,
+            $ipAddress,
+            request()->header('User-Agent')
+        );
+
+        // ─── 9. RÉINITIALISER LE COMPTEUR DE RATE LIMITING ─────────────────
+
+        $this->rateLimitService->recordSuccessfulLogin($email, $ipAddress);
+
+        // ─── 10. METTRE À JOUR last_login_at ───────────────────────────
+
+        $user->update([
+            'last_login_at'         => now(),
+            'failed_login_attempts' => 0, // Reset
+        ]);
+
+        // ─── 11. LOGGER LA CONNEXION ──────────────────────────────────────
+
+        $this->securityLogService->logSuccessfulLogin($user, $deviceInfo);
+
+        // ─── 12. ENVOYER NOTIFICATION DE CONNEXION (PHASE 3) ──────────────
+
+        $this->notificationService->notifyNewLogin(
+            $user,
+            $ipAddress,
+            $deviceInfo,
+            null // location (future: from GeoIP)
+        );
+
+        // ─── 13. RETOURNER LES TOKENS ─────────────────────────────────
+
+        // Charger l'église pour retourner le nom aussi
+        $user->load('church');
+
+        // Préparer les données de l'église
+        $churchData = null;
+        if ($user->church) {
+            $churchData = [
+                'id'   => $user->church->id,
+                'nom'  => $user->church->nom,
+                'ville' => $user->church->ville,
+            ];
+        }
+
+        return new AuthEntity(
+            id:             $user->id,
+            nom:            $user->nom,
+            email:          $user->email,
+            role:           $user->role,
+            actif:          $user->actif,
+            est_de_service: $user->est_de_service,
+            churchId:       $user->churchId,
+            photoUrl:       $user->photoUrl,
+            token:          $accessToken, // Access token court
+            refreshToken:   $refreshToken, // Nouveau : refresh token
+            church:         $churchData,    // Nouvelles : données complètes de l'église
+        );
+    }
+
+    /**
+     * Déconnecte l'utilisateur en révoquant ALL tokens et refresh tokens.
+     *
+     * @param User $user
+     */
+    public function logout(User $user): void
+    {
+        // ─── Révoquer les access tokens Sanctum ──────────────────────
+
+        $user->tokens()->delete();
+
+        // ─── Révoquer ALL refresh tokens ─────────────────────────────
+
+        $this->refreshTokenService->revokeAllForUser($user);
+
+        // ─── Logger la déconnexion ──────────────────────────────────
+
+        $this->securityLogService->logLogout($user);
+    }
+
+    /**
+     * Retourne l'entité de l'utilisateur connecté (avec l'église si liée)
+     *
+     * @param User $user
+     * @return array
+     */
+    public function me(User $user): array
+    {
+        $user->load('church');
+
+        return [
+            'id'                => $user->id,
+            'nom'               => $user->nom,
+            'email'             => $user->email,
+            'role'              => $user->role,
+            'actif'             => $user->actif,
+            'est_de_service'    => $user->est_de_service,
+            'churchId'          => $user->churchId,
+            'photoUrl'          => $user->photoUrl,
+            'telephone'         => $user->telephone,
+            'quartierResidence' => $user->quartierResidence,
+            'profession'        => $user->profession,
+            'groupe'            => $user->groupe,
+            'originaireDe'      => $user->originaireDe,
+            'dateConfirmation'  => $user->dateConfirmation?->format('Y-m-d'),
+            'lieuConfirmation'  => $user->lieuConfirmation,
+            'church'            => $user->church ? [
+                'id'   => $user->church->id,
+                'nom'  => $user->church->nom,
+                'ville' => $user->church->ville,
+            ] : null,
+        ];
+    }
+
+    /**
+     * Rafraîchir l'access token avec un refresh token
+     *
+     * PHASE 1 : Implémente rotation automatique des refresh tokens.
+     *
+     * @param string $refreshToken
+     * @return array ['access_token' => string, 'refresh_token' => string, 'expires_in' => int]
+     * @throws ApiException
+     */
+    public function refreshAccessToken(string $refreshToken): array
+    {
+        $ip = request()->ip();
+        $this->rateLimitService->ensureWithinLimit('refresh_token', 'ip:' . $ip);
+
+        // Vérifier le refresh token et obtenir l'utilisateur
+        $result = $this->refreshTokenService->refreshAccessToken($refreshToken);
+
+        $this->rateLimitService->incrementRateLimit('refresh_token', 'ip:' . $ip);
+
+        if (!$result) {
+            $this->securityLogService->log(
+                action: 'token_refresh',
+                status: 'failed',
+                details: ['reason' => 'invalid_refresh_token']
+            );
+
+            throw ApiException::unauthorized('Refresh token invalide ou expiré.');
+        }
+
+        $user = $result['user'];
+        $newRefreshToken = $result['new_token'];
+
+        // Créer nouveau access token court
+        $newAccessToken = $user->createToken(
+            'eec_signcard_' . $user->role,
+            ['*'],
+            now()->addMinutes(config('security.tokens.access_token_expires_in_minutes'))
+        )->plainTextToken;
+
+        // Logger le rafraîchissement
+        $this->securityLogService->logTokenRefresh($user);
+
+        return [
+            'access_token'  => $newAccessToken,
+            'refresh_token' => $newRefreshToken,
+            'expires_in'    => config('security.tokens.access_token_expires_in_minutes') * 60, // en secondes
+            'token_type'    => 'Bearer',
+        ];
+    }
+
+    /**
+     * Envoie un OTP par email pour réinitialisation mot de passe.
+     *
+     * @param string $email
+     * @throws ApiException
+     */
+    public function sendPasswordResetOTP(string $email): void
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            // Sécurité : ne pas révéler si email existe
+            $this->rateLimitService->incrementRateLimit('password_reset_otp', strtolower($email));
+            return;
+        }
+
+        $this->passwordResetOTPService->generateAndSendOTP($user, $email);
+    }
+
+    /**
+     * Vérifie un OTP pour réinitialisation et retourne un token temporaire.
+     *
+     * @param string $email
+     * @param string $otp
+     * @return array ['reset_token' => '...']
+     * @throws ApiException
+     */
+    public function verifyPasswordResetOTP(string $email, string $otp): array
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            throw ApiException::badRequest('Email introuvable.');
+        }
+
+        $resetToken = $this->passwordResetOTPService->verifyOTP($user, $email, $otp);
+
+        return ['reset_token' => $resetToken];
+    }
+
+    /**
+     * Renvoi un OTP avec gestion des délais.
+     *
+     * @param string $email
+     * @return array
+     * @throws ApiException
+     */
+    public function resendPasswordResetOTP(string $email): array
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            throw ApiException::badRequest('Email introuvable.');
+        }
+
+        return $this->passwordResetOTPService->resendOTP($user, $email);
+    }
+
+    /**
+     * Complète la réinitialisation après validation OTP.
+     *
+     * @param string $email
+     * @param string $resetToken
+     * @param string $password
+     * @throws ApiException
+     */
+    public function confirmPasswordReset(string $email, string $resetToken, string $password): void
+    {
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            throw ApiException::badRequest('Email introuvable.');
+        }
+
+        // Vérifier le reset token en cache
+        $cached = cache()->get('password_reset_' . $user->id);
+        if (!$cached || $cached['token'] !== $resetToken) {
+            throw ApiException::badRequest('Token de réinitialisation invalide ou expiré.');
+        }
+
+        // Mettre à jour le mot de passe
+        $user->update(['password' => $password]);
+
+        // Révoquer ALL tokens
+        $user->tokens()->delete();
+        $this->refreshTokenService->revokeAllForUser($user);
+
+        // Logger
+        $this->securityLogService->logPasswordReset($user, true);
+
+        // Nettoyer le cache
+        cache()->forget('password_reset_' . $user->id);
+    }
+
+    /**
+     * Envoie un email de réinitialisation de mot de passe.
+     *
+     * @param string $email
+     * @throws ApiException
+     */
+    public function sendPasswordResetLink(string $email): void
+    {
+        $ip = request()->ip();
+        $this->rateLimitService->ensureWithinLimit('forgot_password', strtolower($email));
+        $this->rateLimitService->ensureWithinLimit('forgot_password', 'ip:' . $ip);
+
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            // Pour la sécurité, on ne révèle pas si l'email existe
+            $this->rateLimitService->incrementRateLimit('forgot_password', strtolower($email));
+            $this->rateLimitService->incrementRateLimit('forgot_password', 'ip:' . $ip);
+            return;
+        }
+
+        $status = Password::sendResetLink(['email' => $email]);
+
+        $this->rateLimitService->incrementRateLimit('forgot_password', strtolower($email));
+        $this->rateLimitService->incrementRateLimit('forgot_password', 'ip:' . $ip);
+
+        if ($status !== Password::RESET_LINK_SENT) {
+            throw ApiException::badRequest(
+                'Impossible d\'envoyer l\'email de réinitialisation. Réessayez plus tard.'
+            );
+        }
+    }
+
+    /**
+     * Réinitialise le mot de passe avec le token reçu par email.
+     *
+     * PHASE 1 : Révoque tokens + refresh tokens après reset.
+     *
+     * @param string $token
+     * @param string $email
+     * @param string $password
+     * @throws ApiException
+     */
+    public function resetPassword(string $token, string $email, string $password): void
+    {
+        $ip = request()->ip();
+        $this->rateLimitService->ensureWithinLimit('reset_password', strtolower($email));
+        $this->rateLimitService->ensureWithinLimit('reset_password', 'ip:' . $ip);
+
+        $status = Password::reset(
+            [
+                'token'    => $token,
+                'email'    => $email,
+                'password' => $password,
+            ],
+            function (User $user, string $password) {
+                $user->forceFill(['password' => $password])
+                     ->setRememberToken(Str::random(60));
+                $user->save();
+
+                // ─── PHASE 1 : Révoquer ALL tokens ──────────────────
+
+                // Révoquer les access tokens Sanctum
+                $user->tokens()->delete();
+
+                // Révoquer les refresh tokens
+                $this->refreshTokenService->revokeAllForUser($user);
+
+                // Logger le reset
+                $this->securityLogService->logPasswordReset($user, true);
+
+                event(new PasswordReset($user));
+            }
+        );
+
+        if ($status !== Password::PASSWORD_RESET) {
+            $this->rateLimitService->incrementRateLimit('reset_password', strtolower($email));
+            $this->rateLimitService->incrementRateLimit('reset_password', 'ip:' . $ip);
+
+            throw ApiException::badRequest(
+                'Token de réinitialisation invalide ou expiré.'
+            );
+        }
+
+        $this->rateLimitService->resetRateLimit('reset_password', strtolower($email));
+        $this->rateLimitService->resetRateLimit('reset_password', 'ip:' . $ip);
+    }
+
+    /**
+     * Change le mot de passe d'un utilisateur connecté.
+     *
+     * PHASE 1 : Révoque tokens + refresh tokens après changement.
+     *
+     * @param User   $user
+     * @param string $currentPassword
+     * @param string $newPassword
+     * @throws ApiException
+     */
+    public function changePassword(User $user, string $currentPassword, string $newPassword): void
+    {
+        if (!Hash::check($currentPassword, $user->password)) {
+            throw ApiException::badRequest('Mot de passe actuel incorrect.');
+        }
+
+        $user->update(['password' => $newPassword]);
+
+        // ─── PHASE 1 : Révoquer ALL tokens et forcer re-login ───────
+
+        // Révoquer les access tokens Sanctum
+        $user->tokens()->delete();
+
+        // Révoquer les refresh tokens
+        $this->refreshTokenService->revokeAllForUser($user);
+
+        // Logger le changement
+        $this->securityLogService->logPasswordReset($user, true);
+    }
+}
