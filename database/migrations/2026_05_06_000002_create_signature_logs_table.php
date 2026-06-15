@@ -4,6 +4,12 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
+/**
+ * Migration table signature_logs — Traçabilité complète des signatures
+ *
+ * Log immutable de chaque tentative de signature (succès ou échec).
+ * errorMessage est en TEXT pour contenir les erreurs SQL/complètes.
+ */
 return new class extends Migration
 {
     public function up(): void
@@ -26,7 +32,7 @@ return new class extends Migration
             $table->unsignedInteger('totalAmount');
             $table->unsignedInteger('fees');
 
-            // ─── Mode de paiement (si distance) ────────────────────────────────
+            // ─── Mode de paiement (si distance) ──────────────────────────────
             $table->string('paymentMethod', 50)->nullable(); // ESPECES | ORANGE MONEY | MTN MOBILE MONEY
             $table->string('phoneNumber', 20)->nullable();
 
@@ -34,22 +40,23 @@ return new class extends Migration
             $table->enum('signatureType', ['presentiel', 'distance']);
             $table->enum('status', ['pending', 'completed', 'failed'])->index();
 
-            // ─── Référence Campay (si distance) ────────────────────────────────
+            // ─── Référence Campay (si distance) ──────────────────────────────
             $table->string('campay_reference', 255)->nullable();
             $table->unsignedBigInteger('transaction_id')->nullable();
 
-            // ─── Qui a signé en présentiel ? ───────────────────────────────────
+            // ─── Qui a signé en présentiel ? ─────────────────────────────────
             $table->unsignedBigInteger('ancienId')->nullable();
             $table->foreign('ancienId')->references('id')->on('users')->nullOnDelete();
             $table->string('ancienNom', 255)->nullable();
 
             // ─── Métadonnées & Erreurs ────────────────────────────────────────
-            $table->string('errorMessage')->nullable();
+            // TEXT pour contenir les messages d'erreur SQL complets
+            $table->text('errorMessage')->nullable();
             $table->json('metadata')->nullable();
 
             $table->timestamps();
 
-            // ─── Index pour rapports admin ──────────────────────────────────────
+            // ─── Index pour rapports admin ────────────────────────────────────
             $table->index(['userId', 'status', 'created_at']);
             $table->index(['churchId', 'status', 'created_at']);
             $table->index(['signatureType', 'status']);

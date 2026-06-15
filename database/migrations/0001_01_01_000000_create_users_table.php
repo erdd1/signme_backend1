@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Tous les membres (6 rôles) sont dans la même table.
  * Champs identiques aux noms Firebase pour faciliter la migration des données.
+ * Inclut les colonnes de sécurité (MFA, sessions, audit).
  */
 return new class extends Migration
 {
@@ -53,9 +54,17 @@ return new class extends Migration
             $table->date('dateConfirmation')->nullable();
             $table->string('lieuConfirmation', 255)->nullable();
 
-            // ─── Tokens & Sécurité ────────────────────────────────────────────
-            $table->rememberToken();
+            // ─── Sécurité — Email ─────────────────────────────────────────────
             $table->timestamp('email_verified_at')->nullable();
+            $table->boolean('email_verified')->default(false);
+
+            // ─── Sécurité — Notifications & Audit ────────────────────────────
+            $table->boolean('security_notifications_enabled')->default(true);
+            $table->timestamp('last_login_at')->nullable();
+            $table->integer('failed_login_attempts')->default(0);
+
+            // ─── Tokens & Session ─────────────────────────────────────────────
+            $table->rememberToken();
 
             $table->timestamps();
         });

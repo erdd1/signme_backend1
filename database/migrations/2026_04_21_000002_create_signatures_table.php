@@ -8,7 +8,9 @@ use Illuminate\Support\Facades\Schema;
  * Migration table signatures — Collection centrale EEC SignCard
  *
  * Fusionne les collections Firestore : gifts + signatures
- * Contrainte UNIQUE(userId, month) : un membre ne peut signer qu'une fois par mois
+ * UNIQUE(userId, month) : un membre ne peut signer qu'une fois par mois.
+ * campay_reference est en index simple (non-unique) car une même référence
+ * Campay peut couvrir plusieurs mois (plusieurs lignes Signature).
  */
 return new class extends Migration
 {
@@ -51,7 +53,9 @@ return new class extends Migration
             $table->string('ancienNom', 255)->nullable();   // Dénormalisé
 
             // ─── Référence paiement Campay (si distance) ─────────────────────
-            $table->string('campay_reference', 255)->nullable()->unique();
+            // Index simple (non-unique) : une référence Campay peut couvrir plusieurs mois
+            $table->string('campay_reference', 255)->nullable();
+            $table->index('campay_reference', 'idx_signatures_campay_reference');
 
             $table->timestamps();
 

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Stocke chaque tentative de paiement Campay (mobile money).
  * Liée aux signatures via la table pivot signature_payment.
+ * Inclut la colonne months (JSON) pour stocker les mois concernés par le paiement.
  */
 return new class extends Migration
 {
@@ -29,6 +30,7 @@ return new class extends Migration
             $table->string('paymentNumber', 20);            // Numéro de téléphone mobile
             $table->unsignedInteger('amountPerMonth');      // Montant par mois
             $table->tinyInteger('monthsCount')->default(1); // Nombre de mois à signer
+            $table->json('months')->nullable();             // Mois concernés ex: ["2026-01","2026-02"]
             $table->unsignedInteger('totalAmount');         // Total offrandes
             $table->unsignedInteger('fees')->default(0);    // Total frais
             $table->unsignedInteger('amountCharged');       // Montant réellement débité

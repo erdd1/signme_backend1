@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Table de jonction : quels anciens sont désignés de service pour quel mois/église.
  * UNIQUE (ancienId, churchId, mois, annee) — un ancien ne peut être désigné qu'une fois par mois/église.
+ * Inclut les champs de disponibilité (jours/horaires) définis par le pasteur.
  */
 return new class extends Migration
 {
@@ -34,6 +35,28 @@ return new class extends Migration
             $table->unsignedBigInteger('designePar')->nullable();
             $table->foreign('designePar')->references('id')->on('users')->nullOnDelete();
             $table->string('designeParNom', 255)->nullable(); // Dénormalisé
+
+            // ─── Disponibilité de l'ancien de service ─────────────────────────
+            // Jours de travail (JSON array: [1,2,3,4,5,6,7] = lun-dim)
+            // NULL = disponible 24/7 tous les jours
+            $table->json('jours_travail')
+                  ->nullable()
+                  ->comment('Days available: JSON array [1-7] for Mon-Sun, or null for 24/7');
+
+            // Horaire début (HH:MM) — null = 00:00
+            $table->time('horaire_debut')
+                  ->nullable()
+                  ->comment('Start time (HH:MM), null for 00:00');
+
+            // Horaire fin (HH:MM) — null = 23:59
+            $table->time('horaire_fin')
+                  ->nullable()
+                  ->comment('End time (HH:MM), null for 23:59');
+
+            // Date de fin de service (pour suppression automatique = dernier jour du mois)
+            $table->dateTime('date_fin_service')
+                  ->nullable()
+                  ->comment('Auto-remove ancien from service at this datetime');
 
             $table->timestamps();
 
