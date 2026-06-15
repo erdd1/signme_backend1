@@ -232,6 +232,18 @@ class UserService
             throw ApiException::forbidden('Vous ne pouvez pas désactiver un administrateur.');
         }
 
+        //EMPECHER L'ADMIN DE SE DESACTIVER LUI MEME
+
+        if (
+            $authUser->id === $user->id &&
+            $user->isAdmin() &&
+            $user->actif
+        ) {
+            throw ApiException::forbidden(
+                'Un administrateur ne peut pas désactiver son propre compte.'
+            );
+        }
+
         $user->update(['actif' => !$user->actif]);
 
         // Si désactivé : révoquer tous ses tokens

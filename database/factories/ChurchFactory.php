@@ -12,15 +12,12 @@ class ChurchFactory extends Factory
     public function definition(): array
     {
         return [
-            'nom'           => fake()->name(),
-            'email'         => fake()->email(),
-            'telephone'     => fake()->phoneNumber(),
-            'adresse'       => fake()->address(),
-            'ville'         => fake()->city(),
-            'codePostal'    => fake()->postcode(),
-            'pays'          => fake()->country(),
-            'logoUrl'       => fake()->url(),
-            'actif'         => true,
+            'nom'       => fake()->company(),
+            'ville'     => fake()->city(),
+            'region'    => fake()->state(),
+            'adresse'   => fake()->address(),
+            'telephone' => fake()->phoneNumber(),
+            'email'     => fake()->safeEmail(),
         ];
     }
 }
