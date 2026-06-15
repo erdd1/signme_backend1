@@ -24,11 +24,15 @@ class UserFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => fake()->name(),
+            'nom' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'role' => 'paroissien',
+            'actif' => true,
+            'churchId' => null,
+            'est_de_service' => false,
         ];
     }
 
@@ -39,6 +43,67 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the user is an administrator.
+     */
+    public function admin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'administrateur',
+        ]);
+    }
+
+    /**
+     * Indicate that the user is a pastor.
+     */
+    public function pasteur(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'pasteur',
+        ]);
+    }
+
+    /**
+     * Indicate that the user is an elder.
+     */
+    public function ancien(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'ancien',
+            'est_de_service' => true,
+        ]);
+    }
+
+    /**
+     * Indicate that the user is active.
+     */
+    public function actif(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'actif' => true,
+        ]);
+    }
+
+    /**
+     * Indicate that the user is inactive.
+     */
+    public function inactif(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'actif' => false,
+        ]);
+    }
+
+    /**
+     * Set the user's church ID.
+     */
+    public function forChurch(int $churchId): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'churchId' => $churchId,
         ]);
     }
 }

@@ -11,10 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('device_sessions', function (Blueprint $table) {
-            // Ajouter app_version après os_version
-            $table->string('app_version')->nullable()->after('os_version');
-        });
+        // Déjà présent dans create_device_sessions_table
     }
 
     /**
@@ -22,8 +19,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('device_sessions', function (Blueprint $table) {
-            $table->dropColumn('app_version');
-        });
+        // Déjà présent dans create_device_sessions_table
     }
 };
