@@ -349,6 +349,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::put('/{id}',           [SignatureController::class, 'update']);
         Route::delete('/{id}',        [SignatureController::class, 'destroy']);
         Route::post('/{id}/refund',   [SignatureController::class, 'refund']);
+        Route::post('/presentiel', [SignatureController::class, 'signPresentiel']);
     });
 
     // =========================================================================
