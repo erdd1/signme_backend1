@@ -3,11 +3,9 @@
 namespace App\Modules\Payment\Http;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Payment\Http\Requests\InitiatePaymentRequest;
 use App\Modules\Payment\Http\Requests\WebhookRequest;
 use App\Modules\Payment\Http\Resources\PaymentResource;
 use App\Modules\Payment\Application\PaymentService;
-use App\Modules\Payment\Application\DTOs\InitiatePaymentDTO;
 use App\Modules\Payment\Application\DTOs\ProcessPaymentDTO;
 use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
 use App\Modules\Payment\Application\Jobs\ProcessCampayWebhookJob;
