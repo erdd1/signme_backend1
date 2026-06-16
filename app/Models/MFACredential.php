@@ -23,6 +23,8 @@ class MFACredential extends Model
 {
     use HasFactory;
 
+    protected $table = 'm_f_a_credentials';
+
     protected $fillable = [
         'user_id',
         'mfa_enabled',
