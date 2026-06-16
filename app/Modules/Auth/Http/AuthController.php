@@ -193,27 +193,6 @@ class AuthController extends Controller
         );
     }
 
-    /**
-     * POST /api/v1/auth/reset-password
-     *
-     * DEPRECATED: Réinitialise le mot de passe avec le token reçu par email.
-     * Conservé pour compatibilité rétroactive.
-     *
-     * Body: { reset_token, email, password, password_confirmation }
-     */
-    public function resetPassword(ResetPasswordRequest $request): JsonResponse
-    {
-        $this->authService->resetPassword(
-            $request->reset_token,
-            $request->email,
-            $request->password
-        );
-
-        return $this->successResponse(
-            null,
-            'Mot de passe réinitialisé avec succès. Veuillez vous reconnecter.'
-        );
-    }
 
     /**
      * POST /api/v1/auth/change-password

@@ -5,11 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Auth\Passwords\CanResetPassword;
-use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use App\Modules\Auth\Notifications\ResetPasswordNotification;
 use Laravel\Sanctum\HasApiTokens;
 
 /**
@@ -33,17 +30,13 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string|null $dateConfirmation
  * @property string|null $lieuConfirmation
  */
-class User extends Authenticatable implements CanResetPasswordContract
-{
-    use CanResetPassword, HasApiTokens, HasFactory, Notifiable;
+    class User extends Authenticatable
+    {
+    use HasApiTokens, HasFactory, Notifiable;
 
     /**
      * Envoie l'email de réinitialisation (lien deep link SignMe + code).
      */
-    public function sendPasswordResetNotification($token): void
-    {
-        $this->notify(new ResetPasswordNotification($token));
-    }
 
     // ─── Rôles disponibles ────────────────────────────────────────────────────
     public const ROLE_ADMIN      = 'administrateur';

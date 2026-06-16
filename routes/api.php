@@ -71,9 +71,6 @@ Route::prefix('v1')->group(function () {
         Route::post('/confirm-password-reset', [AuthController::class, 'confirmPasswordReset'])
             ->middleware('throttle:auth-reset');
         
-        // ─── Ancien flux (compatibilité) ───────────────────────────────
-        Route::post('/reset-password', [AuthController::class, 'resetPassword'])
-            ->middleware('throttle:auth-reset');
     });
 
     // =========================================================================
