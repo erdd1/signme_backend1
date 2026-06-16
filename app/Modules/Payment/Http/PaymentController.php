@@ -30,54 +30,7 @@ class PaymentController extends Controller
         private CampayGateway $campayGateway,
     ) {}
 
-    /**
-     * POST /api/v1/payments/initiate
-     * Initier un paiement
-     */
-    public function initiate(InitiatePaymentRequest $request)
-    {
-        try {
-            $user = $request->user();
-            $churchId = $user->churchId ?? 1; // Adapter si nécessaire
-
-            $dto = new InitiatePaymentDTO(
-                userId: $user->id,
-                churchId: $churchId,
-                paymentOperator: $request->validated('paymentOperator'),
-                paymentNumber: $request->validated('paymentNumber'),
-                amountPerMonth: $request->validated('amountPerMonth'),
-                monthsCount: $request->validated('monthsCount'),
-                fees: $request->validated('fees'),
-                signatureType: $request->validated('signatureType'),
-                signatureIds: $request->validated('signatureIds'),
-            );
-
-            $result = $this->paymentService->initiate($dto);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Paiement initié avec succès',
-                'data' => [
-                    'paymentId' => $result['paymentId'],
-                    'paymentLink' => $result['paymentLink'],
-                    'amount' => $result['amount'],
-                    'currency' => $result['currency'],
-                ],
-            ], 200);
-
-        } catch (Exception $e) {
-            \Log::error('Payment initiation error', [
-                'error' => $e->getMessage(),
-                'user' => $request->user()->id ?? null,
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-            ], 400);
-        }
-    }
-
+   
     /**
      * POST /api/v1/webhooks/campay
      *
