@@ -14,6 +14,7 @@ use App\Modules\Publication\Http\PublicationController;
 use App\Modules\AncienDesignation\Http\AncienDesignationController;
 use App\Modules\Rapport\Http\RapportController;
 use App\Modules\Payment\Http\PaymentController;
+use App\Modules\Badge\Http\BadgeController;
 
 /*
 |=============================================================================
@@ -263,6 +264,16 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/{paymentId}', [PaymentController::class, 'show']);
         // NOTE : L'initiation de paiement passe par POST /api/v1/signatures/distance
         // (SignatureService crée signatures + PaymentTransaction de façon atomique)
+    });
+
+    // =========================================================================
+    // CLIENT NOTIFICATIONS BADGES (Tous rôles)
+    // =========================================================================
+    Route::prefix('notifications')->group(function () {
+        // GET  /api/v1/notifications/badges            → compteurs non-lus
+        Route::get('/badges',            [BadgeController::class, 'badges']);
+        // POST /api/v1/notifications/badges/mark-read  → reset un compteur
+        Route::post('/badges/mark-read', [BadgeController::class, 'markRead']);
     });
 
 }); // fin CLIENT API v1 (role.not:administrateur)

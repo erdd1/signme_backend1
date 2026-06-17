@@ -5,6 +5,7 @@ namespace App\Modules\Publication\Application\Services;
 use App\Models\Publication;
 use App\Models\User;
 use App\Core\Exceptions\ApiException;
+use App\Modules\Badge\Application\Services\BadgeService;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 
@@ -17,6 +18,9 @@ use Illuminate\Support\Facades\Cache;
  */
 class PublicationService
 {
+    public function __construct(
+        private readonly BadgeService $badgeService
+    ) {}
     /**
      * Liste les publications d'une ou toutes les églises (fil d'actualité).
      *
@@ -85,6 +89,12 @@ class PublicationService
             'auteurPhotoUrl'    => $authUser->photoUrl,
             'date'              => now(),
         ]);
+
+        // L'auteur ne doit pas voir son propre badge — marquer comme lu dès la création
+        $this->badgeService->markPublicationReadByAuthor(
+            (int) $publication->id,
+            (int) $authUser->id
+        );
 
         $this->bumpPublicationCache((int) $churchId);
 

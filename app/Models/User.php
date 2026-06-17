@@ -14,21 +14,23 @@ use Laravel\Sanctum\HasApiTokens;
  *
  * Table centrale : tous les membres (6 rôles) sont dans ce modèle.
  *
- * @property int         $id
- * @property string      $nom
- * @property string      $email
- * @property string      $role
- * @property int|null    $churchId
- * @property bool        $actif
- * @property bool        $est_de_service
- * @property string|null $photoUrl
- * @property string|null $telephone
- * @property string|null $quartierResidence
- * @property string|null $profession
- * @property string|null $groupe
- * @property string|null $originaireDe
- * @property string|null $dateConfirmation
- * @property string|null $lieuConfirmation
+ * @property int              $id
+ * @property string           $nom
+ * @property string           $email
+ * @property string           $role
+ * @property int|null         $churchId
+ * @property bool             $actif
+ * @property bool             $est_de_service
+ * @property string|null      $photoUrl
+ * @property string|null      $telephone
+ * @property string|null      $quartierResidence
+ * @property string|null      $profession
+ * @property string|null      $groupe
+ * @property string|null      $originaireDe
+ * @property string|null      $dateConfirmation
+ * @property string|null      $lieuConfirmation
+ * @property \Carbon\Carbon|null $last_read_historique_at              Dernière visite onglet Historique
+ * @property \Carbon\Carbon|null $last_read_historique_signatures_at   Dernière visite onglet Historique Signatures
  */
     class User extends Authenticatable
     {
@@ -71,6 +73,9 @@ use Laravel\Sanctum\HasApiTokens;
         'originaireDe',
         'dateConfirmation',
         'lieuConfirmation',
+        // ─── Badges de lecture ────────────────────────────────────────────
+        'last_read_historique_at',
+        'last_read_historique_signatures_at',
     ];
 
     protected $hidden = [
@@ -81,10 +86,13 @@ use Laravel\Sanctum\HasApiTokens;
     protected function casts(): array
     {
         return [
-            'actif'            => 'boolean',
-            'est_de_service'   => 'boolean',
-            'dateConfirmation' => 'date',
-            'password'         => 'hashed',
+            'actif'                                => 'boolean',
+            'est_de_service'                       => 'boolean',
+            'dateConfirmation'                     => 'date',
+            'password'                             => 'hashed',
+            // ─── Badges ──────────────────────────────────────────────────
+            'last_read_historique_at'              => 'datetime',
+            'last_read_historique_signatures_at'   => 'datetime',
         ];
     }
 
@@ -108,6 +116,14 @@ use Laravel\Sanctum\HasApiTokens;
     public function publications(): HasMany
     {
         return $this->hasMany(Publication::class, 'auteurId');
+    }
+
+    /**
+     * Publications lues par cet utilisateur (via publication_reads)
+     */
+    public function publicationReads(): HasMany
+    {
+        return $this->hasMany(PublicationRead::class, 'userId');
     }
 
     public function ancienDesignations(): HasMany
