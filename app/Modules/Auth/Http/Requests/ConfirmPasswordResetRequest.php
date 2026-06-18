@@ -2,6 +2,7 @@
 
 namespace App\Modules\Auth\Http\Requests;
 
+use App\Core\Rules\StrongPasswordRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -15,7 +16,7 @@ class ConfirmPasswordResetRequest extends FormRequest
         return [
             'reset_token'           => ['required', 'string'],
             'email'                 => ['required', 'email'],
-            'password'              => ['required', 'string', 'min:8', 'confirmed'],
+            'password'              => ['required', 'string', new StrongPasswordRule(), 'confirmed'],
             'password_confirmation' => ['required'],
         ];
     }
@@ -26,7 +27,6 @@ class ConfirmPasswordResetRequest extends FormRequest
             'reset_token.required'           => 'Token invalide.',
             'email.required'                 => 'L\'adresse email est obligatoire.',
             'password.required'              => 'Le nouveau mot de passe est obligatoire.',
-            'password.min'                   => 'Le mot de passe doit contenir au moins 8 caractères.',
             'password.confirmed'             => 'Les mots de passe ne correspondent pas.',
             'password_confirmation.required' => 'La confirmation du mot de passe est obligatoire.',
         ];

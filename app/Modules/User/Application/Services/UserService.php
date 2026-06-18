@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
  * - Admin    : Peut tout faire sur tous les utilisateurs
  * - Pasteur  : Peut gérer les membres de son église (sauf créer admin/pasteur)
  * - Secrétaire : Peut créer/gérer ancien, paroissien, trésorier de son église
+ *               ⚠ Ne peut PAS activer/désactiver les comptes
  */
 class UserService
 {
@@ -225,6 +226,14 @@ class UserService
      */
     public function toggleStatus(User $authUser, int $targetId): User
     {
+        // Seule la secrétaire est explicitement interdite ici
+        // (double protection : la route est déjà filtrée par role:pasteur)
+        if ($authUser->isSecretaire()) {
+            throw ApiException::forbidden(
+                'Une secrétaire ne peut pas activer ou désactiver un compte.'
+            );
+        }
+
         $user = $this->findById($authUser, $targetId);
 
         // Ne pas désactiver un admin

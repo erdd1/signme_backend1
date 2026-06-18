@@ -188,9 +188,9 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         // Upload own photo / user photo
         Route::post('/{id}/photo',     [UserController::class, 'uploadPhoto']);
         
-        // Activate/Deactivate user (pasteur/secrétaire)
+        // Activer/Désactiver un compte (pasteur uniquement — secrétaire révoquée)
         Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus'])
-             ->middleware('role:pasteur,secretaire');
+             ->middleware('role:pasteur');
     });
 
     // =========================================================================
