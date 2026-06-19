@@ -43,22 +43,17 @@ class PaymentController extends Controller
     public function webhook(Request $request)
     {
         try {
-            $rawPayload    = $request->getContent();
-            $hmacSignature = $request->header('X-Campay-Signature', '');
-            $payload       = $request->all();
+            $payload = $request->all();
 
             \Log::info('Campay Webhook received', [
-                'reference'   => $payload['reference'] ?? null,
-                'status'      => $payload['status'] ?? null,
-                'raw_payload' => $rawPayload,
-                'header_signature' => substr($hmacSignature, 0, 20) . '...',
+                'reference' => $payload['reference'] ?? null,
+                'status'    => $payload['status'] ?? null,
             ]);
 
-            // ─── 1. Valider la signature HMAC ────────────────────────────────────
-            if (!$this->campayGateway->validateWebhookSignature($rawPayload, $hmacSignature)) {
-                \Log::warning('Campay Webhook: Signature HMAC invalide', [
-                    'received_signature' => substr($hmacSignature, 0, 20) . '...',
-                    'payload_length' => strlen($rawPayload),
+            // ─── 1. Valider la signature JWT (champ "signature" du body) ────────
+            if (!$this->campayGateway->validateWebhookSignature($payload)) {
+                \Log::warning('Campay Webhook: Signature invalide', [
+                    'reference' => $payload['reference'] ?? null,
                 ]);
                 return response()->json(['success' => false, 'message' => 'Invalid signature'], 403);
             }
@@ -71,7 +66,7 @@ class PaymentController extends Controller
             }
 
             // ─── 3. Traitement asynchrone (file Redis payments) ─────────────────
-            ProcessCampayWebhookJob::dispatch($payload, $rawPayload, $hmacSignature);
+            ProcessCampayWebhookJob::dispatch($payload);
 
             \Log::info('Campay Webhook accepté — traitement en file', [
                 'reference' => $campayRef,

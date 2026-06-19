@@ -13,7 +13,6 @@ use App\Modules\Auth\Application\Services\AuthService;
 use App\Modules\Church\Application\Services\ChurchService;
 use App\Modules\User\Application\Services\UserService;
 use App\Modules\Signature\Application\Services\SignatureService;
-use App\Modules\Payment\Application\Services\CampayService;
 use App\Modules\Payment\Application\PaymentService;
 use App\Modules\Payment\Domain\PaymentRepositoryInterface;
 use App\Modules\Payment\Infrastructure\PaymentRepository;
@@ -52,6 +51,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CloudinaryService::class);
 
         // ─── Module Auth ──────────────────────────────────────────────────────
+        $this->app->singleton(\App\Modules\Auth\Application\Services\GoogleTokenVerifier::class);
+
         $this->app->singleton(AuthService::class, function ($app) {
             return new AuthService(
                 $app->make(\App\Modules\Auth\Application\Services\RefreshTokenService::class),
@@ -62,6 +63,7 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(\App\Modules\Auth\Application\Services\SuspiciousActivityDetectionService::class),
                 $app->make(\App\Modules\Auth\Application\Services\SecurityNotificationService::class),
                 $app->make(\App\Modules\Auth\Application\Services\PasswordResetOTPService::class),
+                $app->make(\App\Modules\Auth\Application\Services\GoogleTokenVerifier::class),
             );
         });
 
@@ -109,8 +111,6 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // ─── Module Payment (Campay) ──────────────────────────────────────────
-        $this->app->singleton(CampayService::class);
-        // ─── PaymentService avec DDD (pour les nouveaux endpoints) ─────────────
         $this->app->bind(PaymentRepositoryInterface::class, PaymentRepository::class);
         $this->app->singleton(CampayGateway::class, fn () => new CampayGateway());
         $this->app->singleton(PaymentService::class, function ($app) {

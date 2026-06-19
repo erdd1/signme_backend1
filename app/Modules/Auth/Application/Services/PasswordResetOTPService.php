@@ -195,11 +195,17 @@ class PasswordResetOTPService
             throw ApiException::badRequest('Aucun OTP en cours. Demandez un nouveau code.');
         }
 
-        // ─── Compter les renvois (today) ──────────────────────────────
+        // ─── Compter les renvois de la tentative EN COURS ──────────────
+        // Fenêtre glissante (et non "depuis minuit") : sinon les renvois
+        // s'accumulent sur toute la journée à travers des tentatives de
+        // réinitialisation totalement séparées, et le quota se retrouve
+        // épuisé avant même que le délai d'attente (1/2/5 min) ne soit
+        // respecté. La fenêtre couvre largement l'escalade complète
+        // (1 + 2 + 5 = 8 min) avec une marge confortable.
         $resendCount = OTPCode::where('user_id', $user->id)
                               ->where('type', 'password_reset')
                               ->where('email', $email)
-                              ->whereDate('created_at', '>=', Carbon::today())
+                              ->where('created_at', '>=', Carbon::now()->subMinutes(30))
                               ->count();
 
         if ($resendCount > self::MAX_RESENDS) {
@@ -224,10 +230,15 @@ class PasswordResetOTPService
         // ─── Générer et envoyer nouvel OTP ────────────────────────────
         $this->generateAndSendOTP($user, $email);
 
+        // Délai avant le PROCHAIN renvoi possible (palier suivant de
+        // l'escalade) — un nouvel OTP vient d'être créé, donc le prochain
+        // appel comptera $resendCount + 1.
+        $nextDelayMinutes = self::RESEND_DELAYS[$resendCount] ?? 5;
+
         return [
             'success'               => true,
             'message'               => 'Code renvoyé avec succès.',
-            'next_resend_in_seconds' => 60, // 1ère tentative: 1 min
+            'next_resend_in_seconds' => $nextDelayMinutes * 60,
         ];
     }
 

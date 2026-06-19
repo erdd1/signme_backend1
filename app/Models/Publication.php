@@ -4,15 +4,16 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Modèle Publication — Annonces et méditations de l'église
+ * Modele Publication - Annonces et meditations de l'eglise
  */
 class Publication extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     public const TYPE_ANNONCE   = 'annonce';
     public const TYPE_MEDITATION = 'meditation';
@@ -33,6 +34,7 @@ class Publication extends Model
     {
         return [
             'date' => 'datetime',
+            'deleted_at' => 'datetime',
         ];
     }
 

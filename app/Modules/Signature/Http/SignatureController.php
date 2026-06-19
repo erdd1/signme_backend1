@@ -155,11 +155,9 @@ class SignatureController extends Controller
      */
     public function campayWebhook(Request $request): JsonResponse
     {
-        $rawPayload = $request->getContent();
-        $signature  = $request->header('X-Campay-Signature', '');
-        $payload    = $request->all();
+        $payload = $request->all();
 
-        $this->signatureService->handleWebhook($payload, $rawPayload, $signature);
+        $this->signatureService->handleWebhook($payload);
 
         // Campay attend un 200 OK
         return response()->json(['status' => 'ok'], 200);

@@ -40,6 +40,7 @@ class AuthService
         private readonly SuspiciousActivityDetectionService $suspiciousActivityService,
         private readonly SecurityNotificationService $notificationService,
         private readonly PasswordResetOTPService $passwordResetOTPService,
+        private readonly GoogleTokenVerifier $googleTokenVerifier,
     ) {}
 
     /**
@@ -148,21 +149,32 @@ class AuthService
             }
         }
 
-        // ─── 5. DÉTECTER ACTIVITÉS SUSPECTES (PHASE 2) ──────────────────
+        // ─── 5-13. Détection suspecte, device, tokens, logs, notifications ──
 
-        $suspiciousActivities = $this->suspiciousActivityService->analyzeLogin(
-            $user,
-            $ipAddress,
-            $deviceInfo
-        );
+        return $this->issueTokensFor($user, $email, $deviceInfo, $ipAddress);
+    }
 
-        // ─── 6. ENREGISTRER L'APPAREIL (PHASE 2) ────────────────────────
+    /**
+     * Finalise une authentification réussie (mot de passe ou Google) :
+     * détection d'activité suspecte, enregistrement de l'appareil, émission
+     * des tokens, logs sécurité et notification de connexion.
+     *
+     * Partagé par {@see login()} et {@see loginWithGoogle()} pour éviter de
+     * dupliquer cette logique de sécurité entre les deux flux.
+     */
+    private function issueTokensFor(User $user, string $email, ?string $deviceInfo, string $ipAddress): AuthEntity
+    {
+        // ─── DÉTECTER ACTIVITÉS SUSPECTES (PHASE 2) ─────────────────────
+
+        $this->suspiciousActivityService->analyzeLogin($user, $ipAddress, $deviceInfo);
+
+        // ─── ENREGISTRER L'APPAREIL (PHASE 2) ───────────────────────────
 
         $this->deviceManagementService->registerDevice($user, $deviceInfo, [
             'ip_address' => $ipAddress,
         ]);
 
-        // ─── 7. CRÉER L'ACCESS TOKEN COURT (30 min) ──────────────────────
+        // ─── CRÉER L'ACCESS TOKEN COURT (30 min) ─────────────────────────
 
         $accessToken = $user->createToken(
             'eec_signcard_' . $user->role,
@@ -170,7 +182,7 @@ class AuthService
             now()->addMinutes(config('security.tokens.access_token_expires_in_minutes'))
         )->plainTextToken;
 
-        // ─── 8. CRÉER REFRESH TOKEN (avec rotation) ──────────────────────
+        // ─── CRÉER REFRESH TOKEN (avec rotation) ─────────────────────────
 
         $refreshToken = $this->refreshTokenService->createRefreshToken(
             $user,
@@ -179,22 +191,22 @@ class AuthService
             request()->header('User-Agent')
         );
 
-        // ─── 9. RÉINITIALISER LE COMPTEUR DE RATE LIMITING ─────────────────
+        // ─── RÉINITIALISER LE COMPTEUR DE RATE LIMITING ────────────────────
 
         $this->rateLimitService->recordSuccessfulLogin($email, $ipAddress);
 
-        // ─── 10. METTRE À JOUR last_login_at ───────────────────────────
+        // ─── METTRE À JOUR last_login_at ──────────────────────────────────
 
         $user->update([
             'last_login_at'         => now(),
             'failed_login_attempts' => 0, // Reset
         ]);
 
-        // ─── 11. LOGGER LA CONNEXION ──────────────────────────────────────
+        // ─── LOGGER LA CONNEXION ─────────────────────────────────────────
 
         $this->securityLogService->logSuccessfulLogin($user, $deviceInfo);
 
-        // ─── 12. ENVOYER NOTIFICATION DE CONNEXION (PHASE 3) ──────────────
+        // ─── ENVOYER NOTIFICATION DE CONNEXION (PHASE 3) ─────────────────
 
         $this->notificationService->notifyNewLogin(
             $user,
@@ -203,12 +215,9 @@ class AuthService
             null // location (future: from GeoIP)
         );
 
-        // ─── 13. RETOURNER LES TOKENS ─────────────────────────────────
-
         // Charger l'église pour retourner le nom aussi
         $user->load('church');
 
-        // Préparer les données de l'église
         $churchData = null;
         if ($user->church) {
             $churchData = [
@@ -231,6 +240,52 @@ class AuthService
             refreshToken:   $refreshToken, // Nouveau : refresh token
             church:         $churchData,    // Nouvelles : données complètes de l'église
         );
+    }
+
+    /**
+     * Authentifie un utilisateur via Google Sign-In (ID token vérifié auprès
+     * de Google) et retourne access token + refresh token, comme login().
+     *
+     * Aucune création de compte : seuls les comptes déjà créés par un
+     * admin/pasteur/secrétaire peuvent se connecter via Google, en faisant
+     * correspondre l'email vérifié par Google à un compte existant.
+     *
+     * @throws ApiException
+     */
+    public function loginWithGoogle(string $idToken, ?string $deviceInfo = null): AuthEntity
+    {
+        $ipAddress = request()->ip();
+
+        $googleAccount = $this->googleTokenVerifier->verify($idToken);
+        $email = $googleAccount['email'];
+
+        $rateKey = $email . '|' . $ipAddress;
+        $this->rateLimitService->ensureWithinLimit('login', $rateKey);
+
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            $this->securityLogService->logFailedLogin($email, 'google_no_matching_account');
+            throw ApiException::unauthorized(
+                'Aucun compte SignMe n\'est associé à cette adresse email.'
+            );
+        }
+
+        if (!$user->actif) {
+            $this->securityLogService->logFailedLogin($email, 'account_inactive');
+            throw ApiException::forbidden(
+                'Votre compte a été désactivé. Contactez votre pasteur ou l\'administrateur.'
+            );
+        }
+
+        if ($user->role === 'administrateur') {
+            $this->securityLogService->logFailedLogin($email, 'unauthorized_role_' . $user->role);
+            throw ApiException::forbidden(
+                'Accès refusé. L\'administrateur doit utiliser l\'interface web.'
+            );
+        }
+
+        return $this->issueTokensFor($user, $email, $deviceInfo, $ipAddress);
     }
 
     /**

@@ -131,42 +131,88 @@ class CampayGateway
     }
 
     /**
-     * Valide la signature du webhook Campay (sécurité HMAC-SHA256).
+     * Valide la signature du webhook Campay.
      *
-     * @param string $payload    Corps brut de la requête webhook
-     * @param string $signature  Header X-Campay-Signature
-     * @return bool
+     * Campay n'envoie PAS de header de signature : la preuve est un JWT HS256
+     * transporté dans le champ `signature` du corps JSON, ex. :
+     *   { "reference": "...", "status": "...", "signature": "<header>.<payload>.<sig>" }
+     * Payload JWT attendu : { "iat", "nbf", "exp", "source": "CamPay" }
+     *
+     * @param array $payload Corps JSON décodé du webhook (doit contenir 'signature')
      */
-    public function validateWebhookSignature(string $payload, string $signature): bool
+    public function validateWebhookSignature(array $payload): bool
     {
-        // ✅ Vérifier si la validation HMAC est activée
-        $verifySignature = config('payment.campay.webhook_verify_signature', false);
-        
+        $verifySignature = config('payment.campay.webhook_verify_signature', true);
+
         if (!$verifySignature) {
-            \Log::info('CampayGateway: Vérification de signature HMAC DÉSACTIVÉE (mode dev)');
+            \Log::warning('CampayGateway: Vérification de signature webhook DÉSACTIVÉE (config)');
             return true;
         }
 
-        // ✅ Lire depuis campay.webhook_secret (CAMPAY_WEBHOOK_SECRET dans .env)
-        $secret   = config('campay.webhook_secret', '');
-        $expected = hash_hmac('sha256', $payload, $secret);
-
-        // Si pas de secret configuré, on accepte sans vérification HMAC (dev only)
+        $secret = config('campay.webhook_secret', '');
         if (empty($secret)) {
-            \Log::warning('CampayGateway: CAMPAY_WEBHOOK_SECRET non configuré — HMAC ignoré (dev mode)');
-            return true;
+            \Log::error('CampayGateway: CAMPAY_WEBHOOK_SECRET non configuré — webhook rejeté');
+            return false;
         }
 
-        // ✅ Log de débogage
-        \Log::debug('CampayGateway HMAC Validation', [
-            'secret_set' => !empty($secret),
-            'received_signature' => substr($signature, 0, 20) . '...',
-            'expected_signature' => substr($expected, 0, 20) . '...',
-            'payload_length' => strlen($payload),
-            'match' => hash_equals($expected, $signature),
-        ]);
+        $jwt = $payload['signature'] ?? null;
+        if (!is_string($jwt) || $jwt === '') {
+            \Log::warning('CampayGateway: champ "signature" manquant dans le webhook');
+            return false;
+        }
 
-        return hash_equals($expected, $signature);
+        return $this->verifyCampayJwtSignature($jwt, $secret);
+    }
+
+    /**
+     * Vérifie le JWT HS256 envoyé par Campay dans le champ `signature`.
+     */
+    private function verifyCampayJwtSignature(string $jwt, string $secret): bool
+    {
+        $parts = explode('.', $jwt);
+        if (count($parts) !== 3) {
+            \Log::warning('CampayGateway: format JWT webhook invalide');
+            return false;
+        }
+
+        [$encodedHeader, $encodedPayload, $encodedSignature] = $parts;
+
+        $expectedSignature = $this->base64UrlEncode(
+            hash_hmac('sha256', "{$encodedHeader}.{$encodedPayload}", $secret, true)
+        );
+
+        if (!hash_equals($expectedSignature, $encodedSignature)) {
+            \Log::warning('CampayGateway: signature JWT webhook invalide');
+            return false;
+        }
+
+        $claims = json_decode($this->base64UrlDecode($encodedPayload), true);
+        if (!is_array($claims) || ($claims['source'] ?? null) !== 'CamPay') {
+            \Log::warning('CampayGateway: claim "source" du JWT webhook invalide');
+            return false;
+        }
+
+        $now = now()->timestamp;
+        if (isset($claims['exp']) && $now > $claims['exp']) {
+            \Log::warning('CampayGateway: JWT webhook expiré');
+            return false;
+        }
+        if (isset($claims['nbf']) && $now < $claims['nbf']) {
+            \Log::warning('CampayGateway: JWT webhook pas encore valide (nbf)');
+            return false;
+        }
+
+        return true;
+    }
+
+    private function base64UrlEncode(string $data): string
+    {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    private function base64UrlDecode(string $data): string
+    {
+        return base64_decode(strtr($data, '-_', '+/'));
     }
 
     /**

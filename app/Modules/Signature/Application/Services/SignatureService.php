@@ -451,15 +451,13 @@ class SignatureService
      * Met à jour le statut des signatures et de la transaction.
      * Transaction atomique pour garantir la cohérence.
      *
-     * @param array  $payload   Corps du webhook Campay
-     * @param string $rawPayload Corps brut pour vérification HMAC
-     * @param string $signature  Header X-Campay-Signature
+     * @param array $payload Corps JSON décodé du webhook Campay (contient le champ "signature")
      * @throws ApiException
      */
-    public function handleWebhook(array $payload, string $rawPayload, string $signature): void
+    public function handleWebhook(array $payload): void
     {
-        if (!$this->campayGateway->validateWebhookSignature($rawPayload, $signature)) {
-            Log::warning('Campay Webhook (SignatureService): Signature HMAC invalide');
+        if (!$this->campayGateway->validateWebhookSignature($payload)) {
+            Log::warning('Campay Webhook (SignatureService): Signature invalide');
             throw ApiException::forbidden('Signature webhook invalide.');
         }
 

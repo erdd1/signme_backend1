@@ -22,8 +22,6 @@ class ProcessCampayWebhookJob implements ShouldQueue
 
     public function __construct(
         public array $payload,
-        public string $rawPayload,
-        public string $signature,
     ) {
         $this->onConnection(config('payment.connection', 'redis'));
         $this->onQueue(config('payment.queue', 'payments'));
@@ -31,11 +29,8 @@ class ProcessCampayWebhookJob implements ShouldQueue
 
     public function handle(SignatureService $signatureService): void
     {
-        $signatureService->handleWebhook(
-            $this->payload,
-            $this->rawPayload,
-            $this->signature
-        );
+        // La signature a déjà été validée par PaymentController avant la mise en file.
+        $signatureService->processCampayNotification($this->payload);
     }
 
     public function failed(\Throwable $exception): void

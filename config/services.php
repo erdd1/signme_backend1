@@ -39,4 +39,11 @@ return [
         'webhook_secret' => env('CAMPAY_WEBHOOK_SECRET'),
     ],
 
+    // Client OAuth "Web" créé dans Google Cloud Console — c'est l'audience
+    // (aud) attendue dans l'ID token transmis par l'app mobile via
+    // google_sign_in (serverClientId).
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
 ];

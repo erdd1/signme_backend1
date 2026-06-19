@@ -31,4 +31,14 @@ return [
 
     'cache_prefix' => 'payment:tx:',
 
+    /*
+    |--------------------------------------------------------------------------
+    | Campay
+    |--------------------------------------------------------------------------
+    */
+    'campay' => [
+        // Désactivable uniquement en local/démo (jamais en production).
+        'webhook_verify_signature' => env('CAMPAY_WEBHOOK_VERIFY_SIGNATURE', true),
+    ],
+
 ];

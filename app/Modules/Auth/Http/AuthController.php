@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Modules\Auth\Application\Services\AuthService;
 use App\Modules\Auth\Http\Requests\LoginRequest;
+use App\Modules\Auth\Http\Requests\GoogleLoginRequest;
 use App\Modules\Auth\Http\Requests\RefreshTokenRequest;
 use App\Modules\Auth\Http\Requests\ForgotPasswordRequest;
 use App\Modules\Auth\Http\Requests\ResetPasswordRequest;
@@ -64,6 +65,29 @@ class AuthController extends Controller
             $request->password,
             $request->device_id,
             $request->otp // PHASE 2 : MFA OTP support
+        );
+
+        return $this->successResponse(
+            $entity->toArray(),
+            'Connexion réussie. Bienvenue ' . $entity->nom . ' !'
+        );
+    }
+
+    /**
+     * POST /api/v1/auth/google
+     *
+     * Authentifie un membre via Google Sign-In (ID token vérifié auprès de
+     * Google). Ne crée aucun compte : l'email Google doit correspondre à un
+     * compte existant créé par un admin/pasteur/secrétaire.
+     *
+     * Body: { id_token, device_id? }
+     * Réponse: identique à POST /auth/login
+     */
+    public function loginWithGoogle(GoogleLoginRequest $request): JsonResponse
+    {
+        $entity = $this->authService->loginWithGoogle(
+            $request->id_token,
+            $request->device_id,
         );
 
         return $this->successResponse(

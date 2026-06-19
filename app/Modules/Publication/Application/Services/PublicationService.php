@@ -10,11 +10,11 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * Service Publication — Annonces et méditations de l'église
+ * Service Publication - Annonces et meditations de l'eglise
  *
  * Droits :
- * - Lecture : tous les rôles (filtrée par churchId)
- * - Création/modification/suppression : pasteur, secrétaire, admin
+ * - Lecture : tous les roles (filtree par churchId)
+ * - Creation/modification/suppression : pasteur, secretaire, admin
  */
 class PublicationService
 {
@@ -22,7 +22,7 @@ class PublicationService
         private readonly BadgeService $badgeService
     ) {}
     /**
-     * Liste les publications d'une ou toutes les églises (fil d'actualité).
+     * Liste les publications d'une ou toutes les eglises (fil d'actualite).
      *
      * @param User  $authUser
      * @param array $filters  { type, church_id, per_page }
@@ -32,14 +32,23 @@ class PublicationService
         $churchKey = $authUser->isAdmin()
             ? (string) ($filters['church_id'] ?? 'all')
             : (string) $authUser->churchId;
-        $type      = (string) ($filters['type'] ?? 'all');
-        $page      = max(1, (int) request()->get('page', 1));
-        $version   = (int) Cache::get("pub:version:{$churchKey}", 1);
+        $type = (string) ($filters['type'] ?? 'all');
+        $page = max(1, (int) request()->get('page', 1));
+        $since = $filters['updated_after'] ?? null;
 
-        $cacheKey = "pub:list:{$churchKey}:{$version}:{$type}:{$perPage}:{$page}";
+        $buildQuery = function () use ($authUser, $filters, $since) {
+            $query = Publication::query()
+                ->orderByDesc('updated_at')
+                ->orderByDesc('date')
+                ->orderByDesc('created_at');
 
-        return Cache::remember($cacheKey, now()->addMinutes(3), function () use ($authUser, $filters, $perPage) {
-            $query = Publication::orderByDesc('date')->orderByDesc('created_at');
+            if ($since) {
+                $query->withTrashed()
+                    ->where(function ($q) use ($since) {
+                        $q->where('updated_at', '>=', $since)
+                          ->orWhere('deleted_at', '>=', $since);
+                    });
+            }
 
             if (!$authUser->isAdmin()) {
                 $query->where('churchId', $authUser->churchId);
@@ -51,7 +60,20 @@ class PublicationService
                 $query->where('type', $filters['type']);
             }
 
-            return $query->paginate($perPage);
+            return $query;
+        };
+
+        // Les deltas doivent toujours etre frais pour que le cache mobile puisse
+        // rattraper les modifications et les suppressions apres une coupure.
+        if ($since) {
+            return $buildQuery()->paginate($perPage);
+        }
+
+        $version = (int) Cache::get("pub:version:{$churchKey}", 1);
+        $cacheKey = "pub:list:{$churchKey}:{$version}:{$type}:{$perPage}:{$page}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(3), function () use ($buildQuery, $perPage) {
+            return $buildQuery()->paginate($perPage);
         });
     }
 
@@ -63,7 +85,7 @@ class PublicationService
     }
 
     /**
-     * Crée une nouvelle publication.
+     * Cree une nouvelle publication.
      *
      * @throws ApiException
      */
@@ -73,9 +95,9 @@ class PublicationService
             ? ($data['churchId'] ?? $authUser->churchId)
             : $authUser->churchId;
 
-        // La référence biblique est obligatoire pour les méditations
+        // La reference biblique est obligatoire pour les meditations
         if ($data['type'] === Publication::TYPE_MEDITATION && empty($data['referenceBiblique'])) {
-            throw ApiException::badRequest('La référence biblique est obligatoire pour une méditation.');
+            throw ApiException::badRequest('La reference biblique est obligatoire pour une meditation.');
         }
 
         $publication = Publication::create([
@@ -90,7 +112,7 @@ class PublicationService
             'date'              => now(),
         ]);
 
-        // L'auteur ne doit pas voir son propre badge — marquer comme lu dès la création
+        // L'auteur ne doit pas voir son propre badge - marquer comme lu des la creation
         $this->badgeService->markPublicationReadByAuthor(
             (int) $publication->id,
             (int) $authUser->id
@@ -114,16 +136,16 @@ class PublicationService
             throw ApiException::notFound('Publication');
         }
 
-        // Vérifier que la publication appartient à la bonne église
+        // Verifier que la publication appartient a la bonne eglise
         if (!$authUser->isAdmin() && $pub->churchId !== $authUser->churchId) {
-            throw ApiException::forbidden('Accès refusé à cette publication.');
+            throw ApiException::forbidden('Acces refuse a cette publication.');
         }
 
         return $pub;
     }
 
     /**
-     * Met à jour une publication.
+     * Met a jour une publication.
      *
      * @throws ApiException
      */
@@ -157,7 +179,7 @@ class PublicationService
     {
         $pub = $this->findById($authUser, $id);
 
-        // Seul l'auteur, un pasteur de l'église ou un admin peut supprimer
+        // Seul l'auteur, un pasteur de l'eglise ou un admin peut supprimer
         $canDelete = $authUser->isAdmin()
             || $pub->auteurId === $authUser->id
             || $authUser->isPasteur();

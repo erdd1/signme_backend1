@@ -13,17 +13,31 @@ $status    = $argv[2] ?? 'SUCCESSFUL';
 $secret    = 'CXe2OMTWfv3wO9DcmCDfffWgWaqicUdCi4vCBsn2w700R9uzYptO5OLiB7lEm7oT3NTmAuGjYK1PA2KNJAJ3BA';
 $webhookUrl = 'http://127.0.0.1:8000/api/v1/webhooks/campay';
 
-// Payload exactement comme Campay l'envoie
+function base64UrlEncode(string $data): string
+{
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+// JWT HS256 exactement comme Campay le génère dans le champ "signature"
+$header = base64UrlEncode(json_encode(['alg' => 'HS256', 'app' => 'eec signcard', 'typ' => 'JWT']));
+$claims = base64UrlEncode(json_encode([
+    'iat'    => time(),
+    'nbf'    => time(),
+    'exp'    => time() + 3600,
+    'source' => 'CamPay',
+]));
+$jwtSignature = base64UrlEncode(hash_hmac('sha256', "{$header}.{$claims}", $secret, true));
+$jwt = "{$header}.{$claims}.{$jwtSignature}";
+
+// Payload exactement comme Campay l'envoie (signature dans le body, pas en header)
 $payload = json_encode([
     'reference' => $reference,
     'status'    => $status,
     'amount'    => '1000',
     'currency'  => 'XAF',
     'operator'  => 'ORANGE',
+    'signature' => $jwt,
 ]);
-
-// HMAC-SHA256 signé avec le secret webhook
-$hmac = hash_hmac('sha256', $payload, $secret);
 
 echo "\n══════════════════════════════════════════════════════\n";
 echo "  WEBHOOK LIVE TEST — Simulation Campay\n";
@@ -31,7 +45,7 @@ echo "════════════════════════�
 echo "  URL       : {$webhookUrl}\n";
 echo "  Reference : {$reference}\n";
 echo "  Status    : {$status}\n";
-echo "  HMAC      : {$hmac}\n";
+echo "  JWT       : {$jwt}\n";
 echo "══════════════════════════════════════════════════════\n\n";
 
 // Envoi de la requête via cURL
@@ -42,7 +56,6 @@ curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_HTTPHEADER     => [
         'Content-Type: application/json',
-        'X-Campay-Signature: ' . $hmac,
     ],
     CURLOPT_TIMEOUT        => 10,
 ]);
