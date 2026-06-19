@@ -55,6 +55,18 @@ return [
             'decay_minutes'   => 60,
         ],
 
+        // Envoi OTP réinitialisation mot de passe : max 3 par 60 min (par email + IP)
+        'password_reset_otp' => [
+            'max_attempts'    => 3,
+            'decay_minutes'   => 60,
+        ],
+
+        // Vérification OTP réinitialisation : max 5 par 15 min (par email)
+        'password_reset_verify' => [
+            'max_attempts'    => 5,
+            'decay_minutes'   => 15,
+        ],
+
         // Refresh Token : max 20 par 60 min (par user)
         'refresh_token' => [
             'max_attempts'    => 20,
