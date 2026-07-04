@@ -31,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'not.admin'        => \App\Http\Middleware\NotAdminRole::class,
             'check.actif'      => \App\Http\Middleware\CheckActif::class,
             'ancien.service'   => \App\Http\Middleware\CheckAncienDeService::class,
+            'mfa.enabled'      => \App\Http\Middleware\EnsureMfaEnabled::class,
         ]);
 
         // =====================================================================

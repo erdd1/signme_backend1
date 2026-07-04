@@ -74,6 +74,30 @@ class AuthController extends Controller
     }
 
     /**
+     * POST /api/admin/auth/login
+     *
+     * Authentifie un administrateur pour le dashboard web (signme-admin).
+     * Réservé au rôle `administrateur` — voir AuthService::loginAdmin().
+     *
+     * Body: { email, password, device_id?, otp? }
+     * Réponse: { success, message, data: { ..., access_token, refresh_token, expires_in, token_type, mfaSetupRequired } }
+     */
+    public function loginAdmin(LoginRequest $request): JsonResponse
+    {
+        $entity = $this->authService->loginAdmin(
+            $request->email,
+            $request->password,
+            $request->device_id,
+            $request->otp
+        );
+
+        return $this->successResponse(
+            $entity->toArray(),
+            'Connexion réussie. Bienvenue ' . $entity->nom . ' !'
+        );
+    }
+
+    /**
      * POST /api/v1/auth/google
      *
      * Authentifie un membre via Google Sign-In (ID token vérifié auprès de
@@ -695,6 +719,48 @@ class AuthController extends Controller
         return $this->successResponse(
             $alerts,
             count($alerts) . ' alerte(s) de sécurité système.'
+        );
+    }
+
+    /**
+     * GET /api/admin/auth/audit/all-logins
+     *
+     * Récupère toutes les connexions réussies, tous utilisateurs confondus.
+     *
+     * Query params: days=30, limit=100
+     * Réponse: { success, message, data: [...] }
+     */
+    public function getAllLogins(Request $request): JsonResponse
+    {
+        $days = $request->input('days', 30);
+        $limit = $request->input('limit', 100);
+
+        $logins = $this->auditLogService->getAllLogins($days, $limit);
+
+        return $this->successResponse(
+            $logins,
+            count($logins) . ' connexion(s) récupérée(s).'
+        );
+    }
+
+    /**
+     * GET /api/admin/auth/audit/all-attempts
+     *
+     * Récupère toutes les tentatives échouées, tous utilisateurs confondus.
+     *
+     * Query params: days=7, limit=100
+     * Réponse: { success, message, data: [...] }
+     */
+    public function getAllFailedAttempts(Request $request): JsonResponse
+    {
+        $days = $request->input('days', 7);
+        $limit = $request->input('limit', 100);
+
+        $attempts = $this->auditLogService->getAllFailedAttempts($days, $limit);
+
+        return $this->successResponse(
+            $attempts,
+            count($attempts) . ' tentative(s) échouée(s) récupérée(s).'
         );
     }
 

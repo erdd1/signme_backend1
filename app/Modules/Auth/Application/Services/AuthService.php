@@ -3,6 +3,7 @@
 namespace App\Modules\Auth\Application\Services;
 
 use App\Models\User;
+use App\Modules\User\Http\Resources\UserResource;
 use App\Modules\Auth\Domain\AuthEntity;
 use App\Core\Exceptions\ApiException;
 use Illuminate\Support\Facades\Hash;
@@ -155,6 +156,104 @@ class AuthService
     }
 
     /**
+     * Authentifie un administrateur pour le dashboard web (signme-admin).
+     *
+     * Miroir de {@see login()} mais réservé au rôle `administrateur` — les
+     * autres rôles doivent utiliser le client mobile. Le MFA est obligatoire
+     * pour ce rôle : si l'admin ne l'a pas encore configuré, les tokens sont
+     * quand même émis (nécessaire pour appeler /admin/auth/mfa/enable) mais
+     * `mfaSetupRequired: true` est renvoyé, et le middleware `mfa.enabled`
+     * bloque tout le reste de l'API admin tant que le MFA n'est pas confirmé.
+     *
+     * @throws ApiException
+     */
+    public function loginAdmin(string $email, string $password, ?string $deviceInfo = null, ?string $otp = null): AuthEntity
+    {
+        $ipAddress = request()->ip();
+        $rateKey     = strtolower($email) . '|' . $ipAddress;
+
+        $this->rateLimitService->ensureWithinLimit('login', $rateKey);
+
+        if ($this->rateLimitService->isLoginBlocked($email, $ipAddress)) {
+            $blockingInfo = $this->rateLimitService->getBlockingInfo($email, $ipAddress);
+            $minutes      = $blockingInfo['remaining_minutes'] ?? 1;
+
+            $this->securityLogService->logLoginBlocked($email, $minutes);
+
+            throw ApiException::tooManyRequests(
+                'Trop de tentatives échouées. Réessayez dans ' . $minutes . ' minute(s).',
+                ['retry_after' => $minutes * 60]
+            );
+        }
+
+        $user = User::where('email', $email)->first();
+
+        if (!$user || !Hash::check($password, $user->password)) {
+            $blockingResult = $this->rateLimitService->recordFailedLogin(
+                $email,
+                $ipAddress,
+                request()->header('User-Agent')
+            );
+
+            $this->rateLimitService->incrementRateLimit('login', $rateKey);
+            $this->securityLogService->logFailedLogin($email, 'invalid_credentials');
+
+            if ($blockingResult['is_blocked']) {
+                $minutes = $blockingResult['remaining_minutes'] ?? 1;
+                throw ApiException::tooManyRequests(
+                    'Trop de tentatives échouées. Réessayez dans ' . $minutes . ' minute(s).',
+                    ['retry_after' => $minutes * 60]
+                );
+            }
+
+            throw ApiException::unauthorized('Identifiants invalides.');
+        }
+
+        if (!$user->actif) {
+            $this->securityLogService->logFailedLogin($email, 'account_inactive');
+
+            throw ApiException::forbidden(
+                'Votre compte a été désactivé. Contactez un autre administrateur.'
+            );
+        }
+
+        if ($user->role !== 'administrateur') {
+            $this->securityLogService->logFailedLogin(
+                $email,
+                'unauthorized_role_' . $user->role
+            );
+
+            throw ApiException::forbidden(
+                'Accès réservé aux administrateurs. Utilisez l\'application mobile SignMe.'
+            );
+        }
+
+        if ($this->mfaService->isMFAEnabled($user)) {
+            if (!$otp) {
+                throw ApiException::unauthorized(
+                    'Authentification à deux facteurs requise. Veuillez fournir le code OTP.',
+                    ['mfa_required' => true]
+                );
+            }
+
+            if (!$this->mfaService->verifySecondFactor($user, $otp)) {
+                $this->securityLogService->log(
+                    'mfa_verification_failed',
+                    'failed',
+                    $user,
+                    ['reason' => 'invalid_otp']
+                );
+
+                throw ApiException::unauthorized('Code OTP invalide ou expiré.');
+            }
+        }
+
+        $mfaSetupRequired = !$this->mfaService->isMFAEnabled($user);
+
+        return $this->issueTokensFor($user, $email, $deviceInfo, $ipAddress, $mfaSetupRequired);
+    }
+
+    /**
      * Finalise une authentification réussie (mot de passe ou Google) :
      * détection d'activité suspecte, enregistrement de l'appareil, émission
      * des tokens, logs sécurité et notification de connexion.
@@ -162,7 +261,7 @@ class AuthService
      * Partagé par {@see login()} et {@see loginWithGoogle()} pour éviter de
      * dupliquer cette logique de sécurité entre les deux flux.
      */
-    private function issueTokensFor(User $user, string $email, ?string $deviceInfo, string $ipAddress): AuthEntity
+    private function issueTokensFor(User $user, string $email, ?string $deviceInfo, string $ipAddress, bool $mfaSetupRequired = false): AuthEntity
     {
         // ─── DÉTECTER ACTIVITÉS SUSPECTES (PHASE 2) ─────────────────────
 
@@ -239,6 +338,7 @@ class AuthService
             token:          $accessToken, // Access token court
             refreshToken:   $refreshToken, // Nouveau : refresh token
             church:         $churchData,    // Nouvelles : données complètes de l'église
+            mfaSetupRequired: $mfaSetupRequired,
         );
     }
 
@@ -316,30 +416,9 @@ class AuthService
      */
     public function me(User $user): array
     {
-        $user->load('church');
+        $user->load(['church', 'quartier', 'ville', 'groupePrincipal', 'groupes']);
 
-        return [
-            'id'                => $user->id,
-            'nom'               => $user->nom,
-            'email'             => $user->email,
-            'role'              => $user->role,
-            'actif'             => $user->actif,
-            'est_de_service'    => $user->est_de_service,
-            'churchId'          => $user->churchId,
-            'photoUrl'          => $user->photoUrl,
-            'telephone'         => $user->telephone,
-            'quartierResidence' => $user->quartierResidence,
-            'profession'        => $user->profession,
-            'groupe'            => $user->groupe,
-            'originaireDe'      => $user->originaireDe,
-            'dateConfirmation'  => $user->dateConfirmation?->format('Y-m-d'),
-            'lieuConfirmation'  => $user->lieuConfirmation,
-            'church'            => $user->church ? [
-                'id'   => $user->church->id,
-                'nom'  => $user->church->nom,
-                'ville' => $user->church->ville,
-            ] : null,
-        ];
+        return (new UserResource($user))->resolve();
     }
 
     /**

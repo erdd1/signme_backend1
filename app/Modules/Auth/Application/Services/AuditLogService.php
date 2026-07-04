@@ -153,6 +153,50 @@ class AuditLogService
     }
 
     /**
+     * Obtenir toutes les connexions réussies, tous utilisateurs confondus (admin only)
+     */
+    public function getAllLogins(int $days = 30, int $limit = 100): array
+    {
+        $logs = SecurityLog::where('action', 'login')
+                           ->where('status', 'success')
+                           ->where('created_at', '>', now()->subDays($days))
+                           ->orderBy('created_at', 'desc')
+                           ->limit($limit)
+                           ->get();
+
+        return $logs->map(fn($log) => [
+            'id'           => $log->id,
+            'user_id'      => $log->user_id,
+            'user_name'    => $log->user?->nom ?? 'Unknown',
+            'timestamp'    => $log->created_at->format('Y-m-d H:i:s'),
+            'ip_address'   => $log->details['ip_address'] ?? null,
+            'device_id'    => $log->device_id,
+        ])->toArray();
+    }
+
+    /**
+     * Obtenir toutes les tentatives échouées, tous utilisateurs confondus (admin only)
+     */
+    public function getAllFailedAttempts(int $days = 7, int $limit = 100): array
+    {
+        $logs = SecurityLog::where('status', 'failed')
+                           ->where('created_at', '>', now()->subDays($days))
+                           ->orderBy('created_at', 'desc')
+                           ->limit($limit)
+                           ->get();
+
+        return $logs->map(fn($log) => [
+            'id'           => $log->id,
+            'user_id'      => $log->user_id,
+            'user_name'    => $log->user?->nom ?? 'Unknown',
+            'action'       => $log->action,
+            'timestamp'    => $log->created_at->format('Y-m-d H:i:s'),
+            'ip_address'   => $log->details['ip_address'] ?? null,
+            'reason'       => $log->details['reason'] ?? 'unknown',
+        ])->toArray();
+    }
+
+    /**
      * Exporter les logs en CSV (admin only)
      */
     public function exportLogsAsCSV(User $user, int $days = 30): string

@@ -16,7 +16,8 @@ class LoginRequest extends FormRequest
             'email'     => ['required', 'email', 'max:255'],
             'password'  => ['required', 'string', 'min:6'],
             'device_id' => ['nullable', 'string', 'max:255'],  // PHASE 1 : Device tracking
-            'otp'       => ['nullable', 'string', 'size:6', 'regex:/^\d{6}$/'], // PHASE 2 : MFA
+            // PHASE 2 : MFA — OTP à 6 chiffres OU code de secours (8 car. hexadécimaux majuscules)
+            'otp'       => ['nullable', 'string', 'regex:/^(\d{6}|[0-9A-F]{8})$/'],
         ];
     }
 

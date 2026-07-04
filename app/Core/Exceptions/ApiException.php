@@ -45,9 +45,9 @@ class ApiException extends RuntimeException
         return new self($message, 403);
     }
 
-    public static function unauthorized(string $message = 'Non authentifié'): self
+    public static function unauthorized(string $message = 'Non authentifié', mixed $errors = null): self
     {
-        return new self($message, 401);
+        return new self($message, 401, $errors);
     }
 
     public static function badRequest(string $message, mixed $errors = null): self
@@ -68,5 +68,10 @@ class ApiException extends RuntimeException
     public static function tooManyRequests(string $message = 'Trop de requêtes'): self
     {
         return new self($message, 429);
+    }
+
+    public static function serviceUnavailable(string $message = 'Service temporairement indisponible'): self
+    {
+        return new self($message, 503);
     }
 }

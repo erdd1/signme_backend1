@@ -23,20 +23,22 @@ final class AuthEntity
         public readonly string  $token,              // Access token
         public readonly ?string $refreshToken = null, // Refresh token (PHASE 1)
         public readonly ?array  $church = null,       // Données de l'église
+        public readonly bool    $mfaSetupRequired = false, // Dashboard admin : MFA pas encore configuré
     ) {}
 
     public function toArray(): array
     {
         $data = [
-            'id'             => $this->id,
-            'nom'            => $this->nom,
-            'email'          => $this->email,
-            'role'           => $this->role,
-            'actif'          => $this->actif,
-            'est_de_service' => $this->est_de_service,
-            'churchId'       => $this->churchId,
-            'photoUrl'       => $this->photoUrl,
-            'access_token'   => $this->token,
+            'id'               => $this->id,
+            'nom'              => $this->nom,
+            'email'            => $this->email,
+            'role'             => $this->role,
+            'actif'            => $this->actif,
+            'est_de_service'   => $this->est_de_service,
+            'churchId'         => $this->churchId,
+            'photoUrl'         => $this->photoUrl,
+            'access_token'     => $this->token,
+            'mfaSetupRequired' => $this->mfaSetupRequired,
         ];
 
         // Inclure les données de l'église si disponible

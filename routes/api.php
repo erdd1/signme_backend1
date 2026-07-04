@@ -15,6 +15,14 @@ use App\Modules\AncienDesignation\Http\AncienDesignationController;
 use App\Modules\Rapport\Http\RapportController;
 use App\Modules\Payment\Http\PaymentController;
 use App\Modules\Badge\Http\BadgeController;
+use App\Modules\Evenement\Http\EvenementController;
+use App\Modules\Evenement\Http\ContributionController;
+use App\Modules\Evenement\Http\MesContributionsController;
+use App\Modules\UserLookup\Http\GroupeController;
+use App\Modules\UserLookup\Http\QuartierController;
+use App\Modules\UserLookup\Http\VilleController;
+use App\Modules\Support\Http\SupportController;
+use App\Modules\Push\Http\DeviceTokenController;
 
 /*
 |=============================================================================
@@ -77,39 +85,10 @@ Route::prefix('v1')->group(function () {
     });
 
     // =========================================================================
-    // 3. WEBHOOK CAMPAY — Public (sécurisé par HMAC dans le service)
+    // 3. WEBHOOK NOTCHPAY — Public (sécurisé par HMAC-SHA256 sur le corps brut)
     // =========================================================================
-    Route::post('/webhooks/campay', [PaymentController::class, 'webhook'])
+    Route::post('/webhooks/notchpay', [PaymentController::class, 'webhook'])
          ->name('payments.webhook');
-
-    // TEST - Route pour vérifier l'état du paiement auprès de Campay
-    Route::get('/payments/check/{reference}', function ($reference) {
-        try {
-            $campayGateway = app(\App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway::class);
-            $paymentData = $campayGateway->checkPaymentStatus($reference);
-            
-            if (!$paymentData) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Impossible de vérifier le statut'
-                ], 400);
-            }
-            
-            $internalStatus = $campayGateway->mapStatus($paymentData['status'] ?? 'PENDING');
-            
-            return response()->json([
-                'status' => 'success',
-                'campay_data' => $paymentData,
-                'internal_status' => $internalStatus,
-                'message' => "Statut: {$internalStatus}"
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ], 500);
-        }
-    });
 
     // =========================================================================
     // 4. GRILLE DES FRAIS — Public (utile pour affichage Flutter sans auth)
@@ -181,18 +160,51 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         // Create new user (pasteur/secrétaire)
         Route::post('/',               [UserController::class, 'store'])
              ->middleware('role:pasteur,secretaire');
-        
+
+        // Tableau de bord "Gérer utilisateurs" (stats + filtres) — pasteur/secrétaire
+        // AVANT /{id} pour éviter le conflit de capture.
+        Route::get('/stats', [UserController::class, 'stats'])
+             ->middleware('role:pasteur,secretaire');
+
         Route::get('/{id}',            [UserController::class, 'show']);
-        
+
         // Update own profile / user profile (pasteur can modify role, secrétaire cannot)
         Route::put('/{id}',            [UserController::class, 'update']);
-        
+
         // Upload own photo / user photo
         Route::post('/{id}/photo',     [UserController::class, 'uploadPhoto']);
-        
+
         // Activer/Désactiver un compte (pasteur uniquement — secrétaire révoquée)
         Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus'])
              ->middleware('role:pasteur');
+    });
+
+    // =========================================================================
+    // CLIENT LISTES GÉRÉES (Groupe/Quartier/Ville — champs démographiques users)
+    // Lecture : tous les rôles. Écriture : pasteur/secrétaire uniquement.
+    // =========================================================================
+    Route::prefix('groupes')->group(function () {
+        Route::get('/', [GroupeController::class, 'index']);
+        Route::middleware('role:pasteur,secretaire')->group(function () {
+            Route::post('/', [GroupeController::class, 'store']);
+            Route::delete('/{id}', [GroupeController::class, 'destroy']);
+        });
+    });
+
+    Route::prefix('quartiers')->group(function () {
+        Route::get('/', [QuartierController::class, 'index']);
+        Route::middleware('role:pasteur,secretaire')->group(function () {
+            Route::post('/', [QuartierController::class, 'store']);
+            Route::delete('/{id}', [QuartierController::class, 'destroy']);
+        });
+    });
+
+    Route::prefix('villes')->group(function () {
+        Route::get('/', [VilleController::class, 'index']);
+        Route::middleware('role:pasteur,secretaire')->group(function () {
+            Route::post('/', [VilleController::class, 'store']);
+            Route::delete('/{id}', [VilleController::class, 'destroy']);
+        });
     });
 
     // =========================================================================
@@ -229,6 +241,53 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
             Route::put('/{id}',   [PublicationController::class, 'update']);
             Route::delete('/{id}', [PublicationController::class, 'destroy']);
         });
+    });
+
+    // =========================================================================
+    // CLIENT EVENEMENTS (Module collecte de fonds — fil d'actualité)
+    // =========================================================================
+    Route::prefix('evenements')->group(function () {
+        // READ - Tous les rôles (filtré par visibilité dans le service)
+        Route::get('/',       [EvenementController::class, 'index']);
+
+        // GESTION (liste complète Actif+Archivé+..., avant /{uuid} pour éviter le conflit
+        // de capture) - Pasteur/Secrétaire/Trésorier
+        Route::get('/gestion', [EvenementController::class, 'gestion'])
+             ->middleware('role:pasteur,secretaire,tresorier');
+
+        Route::get('/{uuid}', [EvenementController::class, 'show']);
+
+        // GESTION - Pasteur/Secrétaire (auteur uniquement pour update/publish/etc., cf. service)
+        Route::middleware('role:pasteur,secretaire')->group(function () {
+            Route::post('/',                       [EvenementController::class, 'store']);
+            Route::put('/{uuid}',                  [EvenementController::class, 'update']);
+            Route::post('/{uuid}/publish',         [EvenementController::class, 'publish']);
+            Route::post('/{uuid}/cancel-scheduled', [EvenementController::class, 'cancelScheduled']);
+            Route::post('/{uuid}/terminer',        [EvenementController::class, 'terminer']);
+            Route::post('/{uuid}/archiver',        [EvenementController::class, 'archiver']);
+            Route::post('/{uuid}/desarchiver',     [EvenementController::class, 'desarchiver']);
+        });
+
+        // CONTRIBUTIONS - Tous les rôles peuvent contribuer
+        Route::post('/{uuid}/contributions', [ContributionController::class, 'store']);
+
+        // Vue trésorerie par événement - Pasteur/Secrétaire/Trésorier
+        Route::get('/{uuid}/contributions', [ContributionController::class, 'index'])
+             ->middleware('role:pasteur,secretaire,tresorier');
+    });
+
+    Route::get('/contributions/transaction/{uuid}/status', [ContributionController::class, 'status']);
+
+    // Onglet drawer "Contributions événement" - Pasteur/Secrétaire/Trésorier
+    Route::get('/contributions-evenements', [ContributionController::class, 'allForTreasury'])
+         ->middleware('role:pasteur,secretaire,tresorier');
+
+    // =========================================================================
+    // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)
+    // =========================================================================
+    Route::prefix('mes-contributions')->group(function () {
+        Route::get('/',      [MesContributionsController::class, 'index']);
+        Route::get('/stats', [MesContributionsController::class, 'stats']);
     });
 
     // =========================================================================
@@ -278,7 +337,30 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::post('/badges/mark-read', [BadgeController::class, 'markRead']);
     });
 
+    // =========================================================================
+    // CLIENT SUPPORT (Contact service client — Tous rôles)
+    // =========================================================================
+    Route::get('/support/whatsapp', [SupportController::class, 'whatsapp']);
+
+    // =========================================================================
+    // CLIENT DEVICE TOKENS (Notifications push FCM — Tous rôles)
+    // Uniquement côté client (mobile) : l'admin est un dashboard web, pas
+    // d'appareil à enregistrer.
+    // =========================================================================
+    Route::prefix('device-tokens')->group(function () {
+        Route::post('/',   [DeviceTokenController::class, 'store']);
+        Route::delete('/', [DeviceTokenController::class, 'destroy']);
+    });
+
 }); // fin CLIENT API v1 (role.not:administrateur)
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ADMIN LOGIN — Public (pas de token encore) — dashboard web signme-admin
+// ═════════════════════════════════════════════════════════════════════════════
+Route::prefix('admin')->group(function () {
+    Route::post('/auth/login', [AuthController::class, 'loginAdmin'])
+         ->middleware('throttle:auth-login');
+});
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ADMIN API (Web Dashboard - administrateur only)
@@ -320,16 +402,45 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     });
 
     // =========================================================================
+    // MFA OBLIGATOIRE : tout le reste de l'API admin (hors /admin/auth/*)
+    // est bloqué tant que l'administrateur n'a pas confirmé son MFA.
+    // =========================================================================
+    Route::middleware('mfa.enabled')->group(function () {
+
+    // =========================================================================
     // ADMIN USER MANAGEMENT (Full CRUD)
     // =========================================================================
     Route::prefix('users')->group(function () {
         Route::get('/',         [UserController::class, 'index']);
         Route::post('/',        [UserController::class, 'store']);
+        // AVANT /{id} pour éviter le conflit de capture.
+        Route::get('/stats',    [UserController::class, 'stats']);
         Route::get('/{id}',     [UserController::class, 'show']);
         Route::put('/{id}',     [UserController::class, 'update']);
         Route::delete('/{id}',  [UserController::class, 'destroy']);
         Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus']);
         Route::post('/{id}/photo', [UserController::class, 'uploadPhoto']);
+    });
+
+    // =========================================================================
+    // ADMIN LISTES GÉRÉES (Groupe/Quartier/Ville) — Full CRUD, aucune restriction
+    // =========================================================================
+    Route::prefix('groupes')->group(function () {
+        Route::get('/',        [GroupeController::class, 'index']);
+        Route::post('/',       [GroupeController::class, 'store']);
+        Route::delete('/{id}', [GroupeController::class, 'destroy']);
+    });
+
+    Route::prefix('quartiers')->group(function () {
+        Route::get('/',        [QuartierController::class, 'index']);
+        Route::post('/',       [QuartierController::class, 'store']);
+        Route::delete('/{id}', [QuartierController::class, 'destroy']);
+    });
+
+    Route::prefix('villes')->group(function () {
+        Route::get('/',        [VilleController::class, 'index']);
+        Route::post('/',       [VilleController::class, 'store']);
+        Route::delete('/{id}', [VilleController::class, 'destroy']);
     });
 
     // =========================================================================
@@ -396,6 +507,27 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     });
 
     // =========================================================================
+    // ADMIN EVENEMENTS MANAGEMENT (Module collecte de fonds)
+    // L'admin bypass la contrainte "auteur uniquement" (cf. EvenementService).
+    // Aucune route delete : suppression jamais exposée (légal/comptable).
+    // =========================================================================
+    Route::prefix('evenements')->group(function () {
+        Route::get('/',                        [EvenementController::class, 'index']);
+        Route::get('/gestion',                 [EvenementController::class, 'gestion']);
+        Route::get('/{uuid}',                  [EvenementController::class, 'show']);
+        Route::post('/',                       [EvenementController::class, 'store']);
+        Route::put('/{uuid}',                  [EvenementController::class, 'update']);
+        Route::post('/{uuid}/publish',         [EvenementController::class, 'publish']);
+        Route::post('/{uuid}/cancel-scheduled', [EvenementController::class, 'cancelScheduled']);
+        Route::post('/{uuid}/terminer',        [EvenementController::class, 'terminer']);
+        Route::post('/{uuid}/archiver',        [EvenementController::class, 'archiver']);
+        Route::post('/{uuid}/desarchiver',     [EvenementController::class, 'desarchiver']);
+        Route::get('/{uuid}/contributions',    [ContributionController::class, 'index']);
+    });
+
+    Route::get('/contributions-evenements', [ContributionController::class, 'allForTreasury']);
+
+    // =========================================================================
     // ADMIN PAYMENT/SIGNATURE PAYMENT MANAGEMENT (Full CRUD)
     // =========================================================================
     Route::prefix('payments')->group(function () {
@@ -417,5 +549,12 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::get('/export/audit',     [RapportController::class, 'exportAudit']);
         Route::get('/export/security',  [RapportController::class, 'exportSecurity']);
     });
+
+    // =========================================================================
+    // ADMIN SUPPORT (Contact service client)
+    // =========================================================================
+    Route::get('/support/whatsapp', [SupportController::class, 'whatsapp']);
+
+    }); // fin mfa.enabled
 
 }); // fin ADMIN API
