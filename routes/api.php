@@ -546,6 +546,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::get('/secretaire',  [RapportController::class, 'secretaire']);
         Route::get('/finances/annuel',  [RapportController::class, 'financesAnnuel']);
         Route::get('/finances/mois',    [RapportController::class, 'financesMois']);
+        Route::get('/comparaison', [RapportController::class, 'comparaison']);
         Route::get('/export/audit',     [RapportController::class, 'exportAudit']);
         Route::get('/export/security',  [RapportController::class, 'exportSecurity']);
     });
