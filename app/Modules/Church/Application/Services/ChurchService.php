@@ -109,14 +109,14 @@ class ChurchService
             throw ApiException::notFound('Église');
         }
 
-        $church->update(array_filter([
-            'nom'       => $data['nom']       ?? null,
-            'ville'     => $data['ville']     ?? null,
-            'region'    => $data['region']    ?? null,
-            'adresse'   => $data['adresse']   ?? null,
-            'telephone' => $data['telephone'] ?? null,
-            'email'     => $data['email']     ?? null,
-        ], fn($v) => !is_null($v)));
+        $updateData = [];
+        foreach (['nom', 'ville', 'region', 'adresse', 'telephone', 'email'] as $field) {
+            if (array_key_exists($field, $data)) {
+                $updateData[$field] = $data[$field];
+            }
+        }
+
+        $church->update($updateData);
 
         return $church->fresh();
     }
