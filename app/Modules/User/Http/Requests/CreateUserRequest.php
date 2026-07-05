@@ -21,26 +21,40 @@ class CreateUserRequest extends FormRequest
             'role'              => ['required', 'string', Rule::in(User::ROLES)],
             'churchId'          => ['nullable', 'integer', 'exists:churches,id'],
             'telephone'         => ['nullable', 'string', 'max:20'],
-            'quartierResidence' => ['nullable', 'string', 'max:150'],
             'profession'        => ['nullable', 'string', 'max:150'],
-            'groupe'            => ['nullable', 'string', 'max:100'],
-            'originaireDe'      => ['nullable', 'string', 'max:100'],
+            'originaireDe'      => ['nullable', 'string', Rule::in(User::REGIONS)],
             'dateConfirmation'  => ['nullable', 'date'],
             'lieuConfirmation'  => ['nullable', 'string', 'max:255'],
+
+            // ─── Démographie ────────────────────────────────────────────
+            'sexe'              => ['nullable', 'string', Rule::in(User::SEXES)],
+            'dateNaissance'     => ['nullable', 'date', 'before:today'],
+            'quartierId'        => ['nullable', 'integer', 'exists:quartiers,id'],
+            'villeId'           => ['nullable', 'integer', 'exists:villes,id'],
+            'groupeIds'         => ['nullable', 'array'],
+            'groupeIds.*'       => ['integer', 'exists:groupes,id'],
+            'groupePrincipalId' => ['nullable', 'integer', 'exists:groupes,id'],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'nom.required'    => 'Le nom est obligatoire.',
-            'email.required'  => 'L\'email est obligatoire.',
-            'email.unique'    => 'Cet email est déjà utilisé.',
-            'email.email'     => 'L\'email n\'est pas valide.',
-            'role.required'   => 'Le rôle est obligatoire.',
-            'role.in'         => 'Rôle invalide. Valeurs acceptées : ' . implode(', ', User::ROLES),
-            'password.min'    => 'Le mot de passe doit contenir au moins 8 caractères.',
-            'churchId.exists' => 'L\'église spécifiée n\'existe pas.',
+            'nom.required'         => 'Le nom est obligatoire.',
+            'email.required'       => 'L\'email est obligatoire.',
+            'email.unique'         => 'Cet email est déjà utilisé.',
+            'email.email'          => 'L\'email n\'est pas valide.',
+            'role.required'        => 'Le rôle est obligatoire.',
+            'role.in'               => 'Rôle invalide. Valeurs acceptées : ' . implode(', ', User::ROLES),
+            'password.min'          => 'Le mot de passe doit contenir au moins 8 caractères.',
+            'churchId.exists'       => 'L\'église spécifiée n\'existe pas.',
+            'originaireDe.in'       => 'Région invalide. Valeurs acceptées : ' . implode(', ', User::REGIONS),
+            'sexe.in'               => 'Le sexe doit être "homme" ou "femme".',
+            'dateNaissance.before'  => 'La date de naissance doit être dans le passé.',
+            'quartierId.exists'     => 'Ce quartier n\'existe pas.',
+            'villeId.exists'        => 'Cette ville n\'existe pas.',
+            'groupeIds.*.exists'    => 'Un des groupes sélectionnés n\'existe pas.',
+            'groupePrincipalId.exists' => 'Le groupe principal sélectionné n\'existe pas.',
         ];
     }
 

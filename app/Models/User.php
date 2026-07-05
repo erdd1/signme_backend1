@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -23,14 +24,18 @@ use Laravel\Sanctum\HasApiTokens;
  * @property bool             $est_de_service
  * @property string|null      $photoUrl
  * @property string|null      $telephone
- * @property string|null      $quartierResidence
  * @property string|null      $profession
- * @property string|null      $groupe
- * @property string|null      $originaireDe
+ * @property string|null      $originaireDe                          Région d'origine (App\Models\User::REGIONS)
  * @property string|null      $dateConfirmation
  * @property string|null      $lieuConfirmation
+ * @property string|null      $sexe                                  homme|femme
+ * @property \Carbon\Carbon|null $dateNaissance
+ * @property int|null         $quartierResidenceId
+ * @property int|null         $villeResidenceId
+ * @property int|null         $groupePrincipalId
  * @property \Carbon\Carbon|null $last_read_historique_at              Dernière visite onglet Historique
  * @property \Carbon\Carbon|null $last_read_historique_signatures_at   Dernière visite onglet Historique Signatures
+ * @property \Carbon\Carbon|null $last_read_evenements_at              Dernière visite du fil d'actualité (badge Événements)
  */
     class User extends Authenticatable
     {
@@ -57,25 +62,54 @@ use Laravel\Sanctum\HasApiTokens;
         self::ROLE_PAROISSIEN,
     ];
 
+    // ─── Démographie ────────────────────────────────────────────────────────
+    public const SEXE_HOMME = 'homme';
+    public const SEXE_FEMME = 'femme';
+
+    public const SEXES = [
+        self::SEXE_HOMME,
+        self::SEXE_FEMME,
+    ];
+
+    public const REGIONS = [
+        'Adamaoua',
+        'Centre',
+        'Est',
+        'Extrême-Nord',
+        'Littoral',
+        'Nord',
+        'Nord-Ouest',
+        'Ouest',
+        'Sud',
+        'Sud-Ouest',
+    ];
+
     protected $fillable = [
         'nom',
         'email',
         'password',
-        'role',
         'churchId',
-        'actif',
-        'est_de_service',
+        // 'role', 'actif' et 'est_de_service' sont volontairement EXCLUS :
+        // champs sensibles (privilège/statut de compte), assignés
+        // explicitement via propriété + save() dans les services
+        // concernés, jamais via mass-assignment.
         'photoUrl',
         'telephone',
-        'quartierResidence',
         'profession',
-        'groupe',
         'originaireDe',
         'dateConfirmation',
         'lieuConfirmation',
+        // ─── Démographie ────────────────────────────────────────────────
+        'sexe',
+        'dateNaissance',
+        'lastBirthdayPushAt',
+        'quartierResidenceId',
+        'villeResidenceId',
+        'groupePrincipalId',
         // ─── Badges de lecture ────────────────────────────────────────────
         'last_read_historique_at',
         'last_read_historique_signatures_at',
+        'last_read_evenements_at',
     ];
 
     protected $hidden = [
@@ -89,10 +123,13 @@ use Laravel\Sanctum\HasApiTokens;
             'actif'                                => 'boolean',
             'est_de_service'                       => 'boolean',
             'dateConfirmation'                     => 'date',
+            'dateNaissance'                         => 'date',
+            'lastBirthdayPushAt'                    => 'date',
             'password'                             => 'hashed',
             // ─── Badges ──────────────────────────────────────────────────
             'last_read_historique_at'              => 'datetime',
             'last_read_historique_signatures_at'   => 'datetime',
+            'last_read_evenements_at'              => 'datetime',
         ];
     }
 
@@ -101,6 +138,26 @@ use Laravel\Sanctum\HasApiTokens;
     public function church(): BelongsTo
     {
         return $this->belongsTo(Church::class, 'churchId');
+    }
+
+    public function quartier(): BelongsTo
+    {
+        return $this->belongsTo(Quartier::class, 'quartierResidenceId');
+    }
+
+    public function ville(): BelongsTo
+    {
+        return $this->belongsTo(Ville::class, 'villeResidenceId');
+    }
+
+    public function groupePrincipal(): BelongsTo
+    {
+        return $this->belongsTo(Groupe::class, 'groupePrincipalId');
+    }
+
+    public function groupes(): BelongsToMany
+    {
+        return $this->belongsToMany(Groupe::class, 'groupe_user', 'userId', 'groupeId');
     }
 
     public function signatures(): HasMany
@@ -116,6 +173,14 @@ use Laravel\Sanctum\HasApiTokens;
     public function publications(): HasMany
     {
         return $this->hasMany(Publication::class, 'auteurId');
+    }
+
+    /**
+     * Jetons FCM (notifications push) de cet utilisateur — un par appareil.
+     */
+    public function deviceTokens(): HasMany
+    {
+        return $this->hasMany(DeviceToken::class, 'userId');
     }
 
     /**

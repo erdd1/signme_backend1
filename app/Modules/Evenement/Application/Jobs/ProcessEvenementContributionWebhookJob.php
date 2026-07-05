@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Modules\Payment\Application\Jobs;
+namespace App\Modules\Evenement\Application\Jobs;
 
-use App\Modules\Signature\Application\Services\SignatureService;
+use App\Modules\Evenement\Application\Services\ContributionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -11,9 +11,13 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Traite le webhook Campay en file Redis (réponse HTTP immédiate).
+ * Traite le webhook NotchPay en file Redis pour une contribution événement.
+ *
+ * Miroir de App\Modules\Payment\Application\Jobs\ProcessPaymentWebhookJob : la
+ * signature a déjà été validée par PaymentController avant la mise en file
+ * (aucune duplication de la vérification webhook ni du gateway NotchPay).
  */
-class ProcessCampayWebhookJob implements ShouldQueue
+class ProcessEvenementContributionWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -27,15 +31,14 @@ class ProcessCampayWebhookJob implements ShouldQueue
         $this->onQueue(config('payment.queue', 'payments'));
     }
 
-    public function handle(SignatureService $signatureService): void
+    public function handle(ContributionService $contributionService): void
     {
-        // La signature a déjà été validée par PaymentController avant la mise en file.
-        $signatureService->processCampayNotification($this->payload);
+        $contributionService->processPaymentNotification($this->payload);
     }
 
     public function failed(\Throwable $exception): void
     {
-        Log::error('ProcessCampayWebhookJob échoué', [
+        Log::error('ProcessEvenementContributionWebhookJob échoué', [
             'reference' => $this->payload['reference'] ?? null,
             'error'     => $exception->getMessage(),
         ]);

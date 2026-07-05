@@ -9,6 +9,7 @@ use App\Models\Signature;
 use App\Modules\Signature\Application\Services\SignatureService;
 use App\Modules\Signature\Http\Requests\CreateSignatureDistanceRequest;
 use App\Modules\Signature\Http\Requests\CreateSignaturePresentielRequest;
+use App\Modules\Auth\Application\Services\RateLimitService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -34,19 +35,23 @@ class SignatureController extends Controller
     use ApiResponseTrait;
 
     public function __construct(
-        private readonly SignatureService $signatureService
+        private readonly SignatureService $signatureService,
+        private readonly RateLimitService $rateLimitService,
     ) {}
 
     /**
      * POST /api/v1/signatures/distance
      *
-     * Initie une signature à distance avec paiement Campay.
-     * Retourne une référence Campay que Flutter affiche ensuite.
+     * Initie une signature à distance avec paiement NotchPay (mobile money ou carte).
+     * Retourne une référence de paiement que Flutter affiche ensuite.
      *
-     * Body: { months: ["2026-01", "2026-02"], amount: 1000, paymentMethod: "ORANGE MONEY", phoneNumber: "699000000" }
+     * Body: { months: ["2026-01", "2026-02"], amount: 1000, paymentMethod: "mobile_money", paymentOperator: "ORANGE MONEY", phoneNumber: "699000000" }
      */
     public function initiateDistance(CreateSignatureDistanceRequest $request): JsonResponse
     {
+        $this->rateLimitService->ensureWithinLimit('payment_initiation', (string) $request->user()->id);
+        $this->rateLimitService->incrementRateLimit('payment_initiation', (string) $request->user()->id);
+
         $result = $this->signatureService->initiateDistanceSignature(
             $request->user(),
             $request->validated()
@@ -143,24 +148,6 @@ class SignatureController extends Controller
             $signatures,
             "{$count} signature(s) présentielle(s) enregistrée(s) avec succès."
         );
-    }
-
-    /**
-     * POST /api/v1/signatures/webhook
-     *
-     * Webhook Campay — ROUTE PUBLIQUE (sans auth Sanctum).
-     * Sécurisée par validation HMAC de la signature Campay.
-     *
-     * Campay appelle cette URL après que le client confirme le paiement.
-     */
-    public function campayWebhook(Request $request): JsonResponse
-    {
-        $payload = $request->all();
-
-        $this->signatureService->handleWebhook($payload);
-
-        // Campay attend un 200 OK
-        return response()->json(['status' => 'ok'], 200);
     }
 
     /**

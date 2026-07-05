@@ -2,23 +2,23 @@
 
 namespace App\Modules\Payment\Application\Services;
 
-use App\Modules\Payment\Application\Jobs\SyncCampayPaymentStatusJob;
+use App\Modules\Payment\Application\Jobs\SyncPaymentStatusJob;
 
 /**
- * Planifie les vérifications Campay en file Redis (fallback webhook).
+ * Planifie les vérifications NotchPay en file Redis (fallback webhook).
  */
 class PaymentPollingDispatcher
 {
-    public function schedule(int $transactionId, string $campayReference): void
+    public function schedule(int $transactionId, string $paymentReference): void
     {
         $delays = config('payment.polling.delays_seconds', [5, 15, 30, 60]);
         $queue  = config('payment.queue', 'payments');
         $conn   = config('payment.connection', 'redis');
 
         foreach ($delays as $index => $seconds) {
-            SyncCampayPaymentStatusJob::dispatch(
+            SyncPaymentStatusJob::dispatch(
                 transactionId: $transactionId,
-                campayReference: $campayReference,
+                paymentReference: $paymentReference,
                 attempt: $index + 1,
             )
                 ->onConnection($conn)

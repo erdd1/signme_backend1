@@ -29,78 +29,71 @@ class TestUsersSeeder extends Seeder
 
         $this->command->info("✅ Église de test : {$church->nom}");
 
+        // 'role' est NOT NULL sans défaut en base : il doit être posé AVANT
+        // le premier save() (pas d'INSERT intermédiaire sans lui).
+
         // Créer un paroissien de test
-        $paroissien = User::firstOrCreate(
-            ['email' => 'paroissien@eec.cm'],
-            [
-                'nom'            => 'Paroissien Test',
-                'password'       => Hash::make('password123'),
-                'role'           => User::ROLE_PAROISSIEN,
-                'churchId'       => $church->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        $paroissien = User::where('email', 'paroissien@eec.cm')->first() ?? new User([
+            'nom'      => 'Paroissien Test',
+            'password' => Hash::make('password123'),
+            'churchId' => $church->id,
+        ]);
+        $paroissien->role = User::ROLE_PAROISSIEN;
+        $paroissien->actif = true;
+        $paroissien->est_de_service = false;
+        $paroissien->save();
 
         $this->command->info("✅ Paroissien créé : {$paroissien->email} / password123");
 
         // Créer un ancien de test
-        $ancien = User::firstOrCreate(
-            ['email' => 'ancien@eec.cm'],
-            [
-                'nom'            => 'Ancien Test',
-                'password'       => Hash::make('password123'),
-                'role'           => User::ROLE_ANCIEN,
-                'churchId'       => $church->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        $ancien = User::where('email', 'ancien@eec.cm')->first() ?? new User([
+            'nom'      => 'Ancien Test',
+            'password' => Hash::make('password123'),
+            'churchId' => $church->id,
+        ]);
+        $ancien->role = User::ROLE_ANCIEN;
+        $ancien->actif = true;
+        $ancien->est_de_service = false;
+        $ancien->save();
 
         $this->command->info("✅ Ancien créé : {$ancien->email} / password123");
 
         // Créer un pasteur pour vérifier qu'il est bloqué
-        $pasteur = User::firstOrCreate(
-            ['email' => 'pasteur@eec.cm'],
-            [
-                'nom'            => 'Pasteur Test',
-                'password'       => Hash::make('password123'),
-                'role'           => User::ROLE_PASTEUR,
-                'churchId'       => $church->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        $pasteur = User::where('email', 'pasteur@eec.cm')->first() ?? new User([
+            'nom'      => 'Pasteur Test',
+            'password' => Hash::make('password123'),
+            'churchId' => $church->id,
+        ]);
+        $pasteur->role = User::ROLE_PASTEUR;
+        $pasteur->actif = true;
+        $pasteur->est_de_service = false;
+        $pasteur->save();
 
         $this->command->info("✅ Pasteur créé : {$pasteur->email} / password123");
 
         // Créer un secrétaire de test
-        $secretaire = User::firstOrCreate(
-            ['email' => 'secretaire@eec.cm'],
-            [
-                'nom'            => 'Secrétaire Test',
-                'password'       => Hash::make('password123'),
-                'role'           => User::ROLE_SECRETAIRE,
-                'churchId'       => $church->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        $secretaire = User::where('email', 'secretaire@eec.cm')->first() ?? new User([
+            'nom'      => 'Secrétaire Test',
+            'password' => Hash::make('password123'),
+            'churchId' => $church->id,
+        ]);
+        $secretaire->role = User::ROLE_SECRETAIRE;
+        $secretaire->actif = true;
+        $secretaire->est_de_service = false;
+        $secretaire->save();
 
         $this->command->info("✅ Secrétaire créé : {$secretaire->email} / password123");
 
         // Créer un trésorier de test
-        $tresorier = User::firstOrCreate(
-            ['email' => 'tresorier@eec.cm'],
-            [
-                'nom'            => 'Trésorier Test',
-                'password'       => Hash::make('password123'),
-                'role'           => User::ROLE_TRESORIER,
-                'churchId'       => $church->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        $tresorier = User::where('email', 'tresorier@eec.cm')->first() ?? new User([
+            'nom'      => 'Trésorier Test',
+            'password' => Hash::make('password123'),
+            'churchId' => $church->id,
+        ]);
+        $tresorier->role = User::ROLE_TRESORIER;
+        $tresorier->actif = true;
+        $tresorier->est_de_service = false;
+        $tresorier->save();
 
         $this->command->info("✅ Trésorier créé : {$tresorier->email} / password123");
 

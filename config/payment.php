@@ -4,7 +4,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | File d'attente Redis (paiements Campay)
+    | File d'attente Redis (paiements NotchPay)
     |--------------------------------------------------------------------------
     */
     'queue' => env('PAYMENT_QUEUE', 'payments'),
@@ -13,7 +13,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Polling Campay (jobs différés après initiation)
+    | Polling NotchPay (jobs différés après initiation)
     |--------------------------------------------------------------------------
     | Délais en secondes — complète le webhook si l'utilisateur confirme tard.
     */
@@ -21,6 +21,18 @@ return [
         'delays_seconds' => [5, 10, 15, 25, 40, 60, 90, 120, 180],
         'max_attempts'   => 12,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Expiration des paiements restés "pending" (ex. worker de queue en panne)
+    |--------------------------------------------------------------------------
+    | Bien au-delà du dernier délai de polling ci-dessus (180s) pour ne jamais
+    | expirer un paiement qui aurait encore une chance légitime d'aboutir.
+    | Avant d'expirer quoi que ce soit, une dernière vérification est TOUJOURS
+    | faite auprès de NotchPay (voir Expire*StaleJob) — un paiement réellement
+    | reçu n'est jamais perdu.
+    */
+    'pending_expiry_minutes' => (int) env('PAYMENT_PENDING_EXPIRY_MINUTES', 15),
 
     /*
     |--------------------------------------------------------------------------
@@ -33,12 +45,12 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Campay
+    | NotchPay
     |--------------------------------------------------------------------------
     */
-    'campay' => [
+    'notchpay' => [
         // Désactivable uniquement en local/démo (jamais en production).
-        'webhook_verify_signature' => env('CAMPAY_WEBHOOK_VERIFY_SIGNATURE', true),
+        'webhook_verify_signature' => env('NOTCHPAY_WEBHOOK_VERIFY_SIGNATURE', true),
     ],
 
 ];

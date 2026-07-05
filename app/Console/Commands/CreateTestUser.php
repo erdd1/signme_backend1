@@ -45,17 +45,20 @@ class CreateTestUser extends Command
         $this->info("Church created/found: ID = {$church->id}");
 
         // Create test user
-        $user = User::firstOrCreate(
-            ['email' => 'test@example.com'],
-            [
+        // 'role' est NOT NULL sans défaut en base : il doit être posé
+        // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
+        $user = User::where('email', 'test@example.com')->first();
+        if (!$user) {
+            $user = new User([
                 'nom' => 'Test User',
-                'role' => 'pasteur',
                 'churchId' => $church->id,
                 'password' => Hash::make('password123'),
-                'actif' => true,
-                'est_de_service' => false,
-            ]
-        );
+            ]);
+        }
+        $user->role = 'pasteur';
+        $user->actif = true;
+        $user->est_de_service = false;
+        $user->save();
 
         $this->info("User created/found: ID = {$user->id}, Email = {$user->email}");
         $this->info("\nTest credentials:");

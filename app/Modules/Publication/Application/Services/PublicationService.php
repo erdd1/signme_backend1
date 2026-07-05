@@ -6,6 +6,7 @@ use App\Models\Publication;
 use App\Models\User;
 use App\Core\Exceptions\ApiException;
 use App\Modules\Badge\Application\Services\BadgeService;
+use App\Modules\Push\Application\Jobs\SendNewContentPushJob;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 
@@ -125,6 +126,18 @@ class PublicationService
         );
 
         $this->bumpPublicationCache((int) $churchId);
+
+        $titrePush = $data['type'] === Publication::TYPE_MEDITATION
+            ? 'Nouvelle méditation'
+            : 'Nouvelle annonce';
+
+        SendNewContentPushJob::dispatch(
+            (int) $churchId,
+            (int) $authUser->id,
+            $titrePush,
+            $publication->titre,
+            ['type' => 'publication', 'id' => (string) $publication->id],
+        );
 
         return $publication;
     }

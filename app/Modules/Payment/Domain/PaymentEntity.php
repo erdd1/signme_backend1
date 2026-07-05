@@ -26,8 +26,8 @@ class PaymentEntity
     private string $paymentOperator;      // ORANGE MONEY, MTN MOBILE MONEY
     private string $paymentNumber;
     private string $signatureType;        // presentiel, distance
-    private ?string $campayReference;
-    private array $campayMetadata;
+    private ?string $paymentReference;
+    private array $paymentMetadata;
     private Carbon $createdAt;
     private ?Carbon $completedAt;
 
@@ -44,8 +44,8 @@ class PaymentEntity
         string $paymentNumber,
         string $signatureType,
         string $status = 'pending',
-        ?string $campayReference = null,
-        array $campayMetadata = [],
+        ?string $paymentReference = null,
+        array $paymentMetadata = [],
         ?Carbon $createdAt = null,
         ?Carbon $completedAt = null,
     ) {
@@ -61,8 +61,8 @@ class PaymentEntity
         $this->paymentOperator = $paymentOperator;
         $this->paymentNumber = $paymentNumber;
         $this->signatureType = $signatureType;
-        $this->campayReference = $campayReference;
-        $this->campayMetadata = $campayMetadata;
+        $this->paymentReference = $paymentReference;
+        $this->paymentMetadata = $paymentMetadata;
         $this->createdAt = $createdAt ?? Carbon::now();
         $this->completedAt = $completedAt;
     }
@@ -129,14 +129,14 @@ class PaymentEntity
         return $this->signatureType;
     }
 
-    public function getCampayReference(): ?string
+    public function getPaymentReference(): ?string
     {
-        return $this->campayReference;
+        return $this->paymentReference;
     }
 
-    public function getCampayMetadata(): array
+    public function getPaymentMetadata(): array
     {
-        return $this->campayMetadata;
+        return $this->paymentMetadata;
     }
 
     public function getCreatedAt(): Carbon
@@ -154,7 +154,7 @@ class PaymentEntity
     /**
      * Marquer le paiement comme complété
      */
-    public function complete(array $campayMetadata = []): void
+    public function complete(array $paymentMetadata = []): void
     {
         if (!$this->status->isPending()) {
             throw new \DomainException('Cannot complete a payment that is not pending');
@@ -166,14 +166,14 @@ class PaymentEntity
         }
 
         $this->status = $newStatus;
-        $this->campayMetadata = $campayMetadata;
+        $this->paymentMetadata = $paymentMetadata;
         $this->completedAt = Carbon::now();
     }
 
     /**
      * Marquer le paiement comme échoué
      */
-    public function fail(array $campayMetadata = []): void
+    public function fail(array $paymentMetadata = []): void
     {
         if (!$this->status->isPending()) {
             throw new \DomainException('Cannot fail a payment that is not pending');
@@ -185,15 +185,15 @@ class PaymentEntity
         }
 
         $this->status = $newStatus;
-        $this->campayMetadata = $campayMetadata;
+        $this->paymentMetadata = $paymentMetadata;
     }
 
     /**
-     * Mettre à jour la référence Campay
+     * Mettre à jour la référence de paiement
      */
-    public function setCampayReference(string $reference): void
+    public function setPaymentReference(string $reference): void
     {
-        $this->campayReference = $reference;
+        $this->paymentReference = $reference;
     }
 
     /**

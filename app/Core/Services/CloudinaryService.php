@@ -18,6 +18,7 @@ use App\Core\Exceptions\ApiException;
 class CloudinaryService
 {
     private const FOLDER_PROFILES = 'eec_signcard/profiles';
+    private const FOLDER_EVENEMENTS = 'eec_signcard/evenements';
 
     public function __construct(
         private readonly Cloudinary $cloudinary,
@@ -72,6 +73,65 @@ class CloudinaryService
                 500
             );
         }
+    }
+
+    /**
+     * Upload une image d'événement sur Cloudinary (module collecte de fonds).
+     *
+     * Contrairement à la photo de profil, on ne recadre pas sur un visage : on
+     * garde le cadrage d'origine et on limite juste les dimensions/le poids.
+     *
+     * @param UploadedFile $file       Fichier image uploadé (déjà validé <= 100 Ko en amont)
+     * @param string       $publicId   Identifiant unique (ex: evenement_{uuid})
+     * @return string URL sécurisée Cloudinary
+     * @throws ApiException si l'upload échoue
+     */
+    public function uploadEvenementImage(UploadedFile $file, string $publicId): string
+    {
+        $this->assertCloudinaryConfigured();
+
+        $path = $file->getRealPath();
+        if ($path === false || !is_readable($path)) {
+            throw ApiException::badRequest('Fichier image illisible ou introuvable.');
+        }
+
+        try {
+            /** @var ApiResponse $response */
+            $response = $this->cloudinary->uploadApi()->upload($path, [
+                'folder'        => self::FOLDER_EVENEMENTS,
+                'public_id'     => $publicId,
+                'overwrite'     => true,
+                'resource_type' => 'image',
+                'width'         => 1024,
+                'crop'          => 'limit',
+                'quality'       => 'auto:good',
+            ]);
+
+            $secureUrl = $this->resolveSecureUrl($response);
+            if ($secureUrl === null || $secureUrl === '') {
+                throw new ApiException(
+                    'Upload Cloudinary sans URL de retour. Vérifiez les clés API sur le dashboard Cloudinary.',
+                    500
+                );
+            }
+
+            return $this->ensureHttpsUrl($secureUrl);
+        } catch (ApiException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw new ApiException(
+                'Erreur lors de l\'upload de l\'image de l\'événement : ' . $e->getMessage(),
+                500
+            );
+        }
+    }
+
+    /**
+     * Génère un public_id unique pour une image d'événement.
+     */
+    public function generateEvenementPublicId(): string
+    {
+        return 'evenement_' . (string) \Illuminate\Support\Str::uuid();
     }
 
     private function assertCloudinaryConfigured(): void

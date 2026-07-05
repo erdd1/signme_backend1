@@ -20,9 +20,9 @@ interface PaymentRepositoryInterface
     public function findById($id): ?PaymentEntity;
 
     /**
-     * Récupérer un paiement par référence Campay
+     * Récupérer un paiement par référence de paiement
      */
-    public function findByCampayReference(string $reference): ?PaymentEntity;
+    public function findByPaymentReference(string $reference): ?PaymentEntity;
 
     /**
      * Récupérer les paiements d'un utilisateur

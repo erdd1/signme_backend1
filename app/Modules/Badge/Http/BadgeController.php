@@ -32,6 +32,7 @@ class BadgeController extends Controller
      *   "success": true,
      *   "data": {
      *     "publications": 3,
+     *     "evenements": 1,
      *     "historique": 2,
      *     "historique_signatures": 1
      *   }
@@ -49,7 +50,7 @@ class BadgeController extends Controller
      *
      * Marque un type de badge comme lu (reset le compteur).
      *
-     * @bodyParam type string required  publications | historique | historique_signatures
+     * @bodyParam type string required  publications | evenements | historique | historique_signatures
      */
     public function markRead(MarkBadgeReadRequest $request): JsonResponse
     {

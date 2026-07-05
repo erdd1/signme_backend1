@@ -22,12 +22,19 @@ class UpdateUserRequest extends FormRequest
             'password'          => ['nullable', 'string', 'min:8'],
             'role'              => ['sometimes', 'string', Rule::in(User::ROLES)],
             'telephone'         => ['nullable', 'string', 'max:20'],
-            'quartierResidence' => ['nullable', 'string', 'max:150'],
             'profession'        => ['nullable', 'string', 'max:150'],
-            'groupe'            => ['nullable', 'string', 'max:100'],
-            'originaireDe'      => ['nullable', 'string', 'max:100'],
+            'originaireDe'      => ['nullable', 'string', Rule::in(User::REGIONS)],
             'dateConfirmation'  => ['nullable', 'date'],
             'lieuConfirmation'  => ['nullable', 'string', 'max:255'],
+
+            // ─── Démographie ────────────────────────────────────────────
+            'sexe'              => ['nullable', 'string', Rule::in(User::SEXES)],
+            'dateNaissance'     => ['nullable', 'date', 'before:today'],
+            'quartierId'        => ['nullable', 'integer', 'exists:quartiers,id'],
+            'villeId'           => ['nullable', 'integer', 'exists:villes,id'],
+            'groupeIds'         => ['nullable', 'array'],
+            'groupeIds.*'       => ['integer', 'exists:groupes,id'],
+            'groupePrincipalId' => ['nullable', 'integer', 'exists:groupes,id'],
         ];
     }
 

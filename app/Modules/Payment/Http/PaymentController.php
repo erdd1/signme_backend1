@@ -17,6 +17,7 @@ use App\Modules\Payment\Application\Services\PaymentReceiptService;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use App\Modules\Payment\Application\Jobs\ProcessPaymentWebhookJob;
 use App\Modules\Signature\Application\Services\SignatureService;
+use App\Modules\Auth\Application\Services\RateLimitService;
 use App\Modules\Evenement\Application\Jobs\ProcessEvenementContributionWebhookJob;
 use App\Models\PaymentEvent;
 use App\Models\PaymentSyncLog;
@@ -41,6 +42,7 @@ class PaymentController extends Controller
         private SignatureService $signatureService,
         private NotchPayGateway $notchPayGateway,
         private PaymentReceiptService $paymentReceiptService,
+        private RateLimitService $rateLimitService,
     ) {}
 
 
@@ -59,6 +61,13 @@ class PaymentController extends Controller
      */
     public function webhook(Request $request)
     {
+        try {
+            $this->rateLimitService->ensureWithinLimit('webhook', $request->ip());
+            $this->rateLimitService->incrementRateLimit('webhook', $request->ip());
+        } catch (ApiException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 429);
+        }
+
         try {
             $rawBody = $request->getContent();
             $signatureHeader = $request->header('x-notch-signature');
@@ -251,13 +260,25 @@ class PaymentController extends Controller
             ]);
 
             $payment = \App\Models\PaymentTransaction::findOrFail($paymentId);
-            $payment->update(['status' => $request->input('status')]);
 
-            \Log::info('Paiement mis à jour par admin', [
-                'payment_id' => $paymentId,
-                'new_status' => $request->input('status'),
-                'updated_by' => $request->user()->id,
-            ]);
+            if ($payment->status !== 'pending') {
+                throw ApiException::badRequest(
+                    "Ce paiement est déjà '{$payment->status}' — statut définitif, modification impossible."
+                );
+            }
+
+            $newStatus = $request->input('status');
+            $payment->update(['status' => $newStatus]);
+
+            PaymentEventRecorder::recordEvent(
+                $payment->id,
+                null,
+                PaymentEvent::TYPE_ADMIN_OVERRIDE,
+                $newStatus,
+                ['previous_status' => 'pending'],
+                $request->user()->id,
+                $request->ip(),
+            );
 
             return response()->json([
                 'success' => true,
@@ -271,6 +292,8 @@ class PaymentController extends Controller
                 'message' => 'Erreur de validation',
                 'errors'  => $e->errors(),
             ], 422);
+        } catch (ApiException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

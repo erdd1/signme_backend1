@@ -8,7 +8,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 use App\Core\Helpers\FeeCalculator;
 
 /**
- * Validation d'une signature à distance (paiement mobile money Campay)
+ * Validation d'une signature à distance (paiement NotchPay : mobile money ou carte)
  */
 class CreateSignatureDistanceRequest extends FormRequest
 {
@@ -17,26 +17,29 @@ class CreateSignatureDistanceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'months'        => ['required', 'array', 'min:1', 'max:12'],
-            'months.*'      => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
-            'amount'        => ['required', 'integer', 'in:' . implode(',', FeeCalculator::ALLOWED_AMOUNTS)],
-            'paymentMethod' => ['required', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
-            'phoneNumber'   => ['required', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
+            'months'          => ['required', 'array', 'min:1', 'max:12'],
+            'months.*'        => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+            'amount'          => ['required', 'integer', 'in:' . implode(',', FeeCalculator::ALLOWED_AMOUNTS)],
+            'paymentMethod'   => ['required', 'string', 'in:mobile_money,card'],
+            'paymentOperator' => ['required_if:paymentMethod,mobile_money', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
+            'phoneNumber'     => ['required_if:paymentMethod,mobile_money', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'months.required'        => 'Veuillez sélectionner au moins un mois.',
-            'months.array'           => 'Format de mois invalide.',
-            'months.*.regex'         => 'Format de mois invalide. Utilisez YYYY-MM.',
-            'amount.required'        => 'Le montant de l\'offrande est obligatoire.',
-            'amount.in'              => 'Montant invalide. Valeurs autorisées : ' . implode(', ', FeeCalculator::ALLOWED_AMOUNTS) . ' FCFA.',
-            'paymentMethod.required' => 'Le mode de paiement est obligatoire.',
-            'paymentMethod.in'       => 'Mode de paiement invalide. Utilisez : ORANGE MONEY ou MTN MOBILE MONEY.',
-            'phoneNumber.required'   => 'Le numéro de téléphone est obligatoire.',
-            'phoneNumber.regex'      => 'Numéro invalide. Format attendu : 237699803165 ou 699803165.',
+            'months.required'            => 'Veuillez sélectionner au moins un mois.',
+            'months.array'               => 'Format de mois invalide.',
+            'months.*.regex'             => 'Format de mois invalide. Utilisez YYYY-MM.',
+            'amount.required'            => 'Le montant de l\'offrande est obligatoire.',
+            'amount.in'                  => 'Montant invalide. Valeurs autorisées : ' . implode(', ', FeeCalculator::ALLOWED_AMOUNTS) . ' FCFA.',
+            'paymentMethod.required'     => 'La méthode de paiement est obligatoire.',
+            'paymentMethod.in'           => 'Méthode de paiement invalide. Utilisez : mobile_money ou card.',
+            'paymentOperator.required_if' => 'L\'opérateur mobile money est obligatoire.',
+            'paymentOperator.in'         => 'Opérateur invalide. Utilisez : ORANGE MONEY ou MTN MOBILE MONEY.',
+            'phoneNumber.required_if'    => 'Le numéro de téléphone est obligatoire.',
+            'phoneNumber.regex'          => 'Numéro invalide. Format attendu : 237699803165 ou 699803165.',
         ];
     }
 

@@ -52,11 +52,11 @@ class PaymentStatusCache
         };
 
         return [
-            'status'           => $transaction->status,
-            'progress'         => $progress,
-            'campay_reference' => $transaction->campay_reference,
-            'total_amount'     => $transaction->amountCharged ?? $transaction->totalAmount,
-            'updated_at'       => now()->toIso8601String(),
+            'status'            => $transaction->status,
+            'progress'          => $progress,
+            'payment_reference' => $transaction->payment_reference,
+            'total_amount'      => $transaction->amountCharged ?? $transaction->totalAmount,
+            'updated_at'        => now()->toIso8601String(),
         ];
     }
 }

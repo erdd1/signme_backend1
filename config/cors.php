@@ -15,14 +15,14 @@ return [
 
     'paths'                    => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods'          => ['*'],
-    'allowed_origins'          => [
-        'http://192.168.1.112:8000',           // Backend local
-        'http://127.0.0.1:8000',               // Localhost
-        'http://localhost:8000',               // Localhost alt
-        'http://localhost:3000',               // Frontend dev (if applicable)
-        'http://192.168.1.112:*',              // All ports on local machine
-        '*',                                    // Allow all (for development)
-    ],
+    // Liste blanche des origines autorisées, pilotée par CORS_ALLOWED_ORIGINS
+    // (valeurs séparées par des virgules). En production, définir cette
+    // variable avec le(s) domaine(s) réel(s) du frontend — jamais de '*'
+    // combiné à supports_credentials=true (reflète alors n'importe quelle
+    // origine avec les identifiants, ce qui annule la protection CORS).
+    'allowed_origins'          => array_values(array_filter(
+        array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS', '')))
+    )),
     'allowed_origins_patterns' => [],
     'allowed_headers'          => ['*'],
     'exposed_headers'          => [],

@@ -211,7 +211,9 @@ class AncienDesignationService
         $designation = AncienDesignation::create($data);
 
         // Mettre à jour le flag est_de_service sur le compte de l'ancien
-        $ancien->update(['est_de_service' => true]);
+        // (champ sensible, non mass-assignable : assignation explicite)
+        $ancien->est_de_service = true;
+        $ancien->save();
 
         Log::info(
             'Ancien désigné de service',
@@ -296,7 +298,9 @@ class AncienDesignationService
         foreach ($allAnciens as $ancien) {
             $shouldBeInService = \in_array($ancien->id, $designedIds, true);
             if ($ancien->est_de_service !== $shouldBeInService) {
-                $ancien->update(['est_de_service' => $shouldBeInService]);
+                // Champ sensible, non mass-assignable : assignation explicite.
+                $ancien->est_de_service = $shouldBeInService;
+                $ancien->save();
             }
         }
 

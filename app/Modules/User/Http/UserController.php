@@ -8,6 +8,7 @@ use App\Modules\User\Application\Services\UserService;
 use App\Modules\User\Http\Requests\CreateUserRequest;
 use App\Modules\User\Http\Requests\UpdateUserRequest;
 use App\Modules\User\Http\Requests\UploadUserPhotoRequest;
+use App\Modules\User\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -32,16 +33,35 @@ class UserController extends Controller
 
     /**
      * GET /api/v1/users
-     * Params: role, actif (0|1), search, church_id, per_page
+     * Params: role, actif (0|1), search, church_id, per_page,
+     *         sexe, moisNaissance (1-12), quartierId, villeId, groupeId, originaireDe
      */
     public function index(Request $request): JsonResponse
     {
-        $filters = $request->only(['role', 'actif', 'search', 'church_id']);
+        $filters = $request->only([
+            'role', 'actif', 'search', 'church_id',
+            'sexe', 'moisNaissance', 'quartierId', 'villeId', 'groupeId', 'originaireDe',
+        ]);
         $perPage = min((int) $request->get('per_page', 20), 100);
 
-        $users = $this->userService->list($request->user(), $filters, $perPage);
+        $users = $this->userService->list($request->user(), $filters, $perPage)
+            ->through(fn ($user) => new UserResource($user));
 
         return $this->paginatedResponse($users, 'Membres récupérés avec succès.');
+    }
+
+    /**
+     * GET /api/v1/users/stats
+     * Tableau de bord "Gérer utilisateurs" : total fidèles, répartition
+     * Cameroun/Diaspora, répartition Hommes/Femmes. Query: church_id (admin).
+     */
+    public function stats(Request $request): JsonResponse
+    {
+        $churchId = $request->get('church_id') ? (int) $request->get('church_id') : null;
+
+        $stats = $this->userService->stats($request->user(), $churchId);
+
+        return $this->successResponse($stats, 'Statistiques récupérées avec succès.');
     }
 
     /**
@@ -109,7 +129,7 @@ class UserController extends Controller
     {
         $user = $this->userService->create($request->user(), $request->validated());
 
-        return $this->createdResponse($user, 'Membre créé avec succès.');
+        return $this->createdResponse(new UserResource($user), 'Membre créé avec succès.');
     }
 
     /**
@@ -119,7 +139,7 @@ class UserController extends Controller
     {
         $user = $this->userService->findById($request->user(), $id);
 
-        return $this->successResponse($user, 'Membre récupéré avec succès.');
+        return $this->successResponse(new UserResource($user), 'Membre récupéré avec succès.');
     }
 
     /**
@@ -129,7 +149,7 @@ class UserController extends Controller
     {
         $user = $this->userService->update($request->user(), $id, $request->validated());
 
-        return $this->successResponse($user, 'Membre mis à jour avec succès.');
+        return $this->successResponse(new UserResource($user), 'Membre mis à jour avec succès.');
     }
 
     /**

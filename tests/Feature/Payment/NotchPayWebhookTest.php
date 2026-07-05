@@ -7,27 +7,29 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 
-use App\Modules\Payment\Application\Jobs\ProcessCampayWebhookJob;
-use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
+use App\Modules\Payment\Application\Jobs\ProcessPaymentWebhookJob;
+use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 
-class CampayWebhookTest extends TestCase
+class NotchPayWebhookTest extends TestCase
 {
     use RefreshDatabase;
 
     public function test_webhook_rejects_invalid_signature(): void
     {
-        $gateway = Mockery::mock(CampayGateway::class);
+        $gateway = Mockery::mock(NotchPayGateway::class);
 
         $gateway->shouldReceive('validateWebhookSignature')
             ->once()
             ->andReturn(false);
 
-        $this->app->instance(CampayGateway::class, $gateway);
+        $this->app->instance(NotchPayGateway::class, $gateway);
 
-        $response = $this->postJson('/api/v1/webhooks/campay', [
-            'reference' => 'REF123',
-            'status' => 'SUCCESSFUL',
-            'signature' => 'invalid.jwt.token',
+        $response = $this->postJson('/api/v1/webhooks/notchpay', [
+            'event' => 'payment.complete',
+            'data' => [
+                'reference' => 'REF123',
+                'status' => 'complete',
+            ],
         ]);
 
         $response->assertStatus(403);
@@ -35,17 +37,19 @@ class CampayWebhookTest extends TestCase
 
     public function test_webhook_requires_reference(): void
     {
-        $gateway = Mockery::mock(CampayGateway::class);
+        $gateway = Mockery::mock(NotchPayGateway::class);
 
         $gateway->shouldReceive('validateWebhookSignature')
             ->once()
             ->andReturn(true);
 
-        $this->app->instance(CampayGateway::class, $gateway);
+        $this->app->instance(NotchPayGateway::class, $gateway);
 
-        $response = $this->postJson('/api/v1/webhooks/campay', [
-            'status' => 'SUCCESSFUL',
-            'signature' => 'valid.jwt.token',
+        $response = $this->postJson('/api/v1/webhooks/notchpay', [
+            'event' => 'payment.complete',
+            'data' => [
+                'status' => 'complete',
+            ],
         ]);
 
         $response->assertStatus(400);
@@ -55,56 +59,52 @@ class CampayWebhookTest extends TestCase
     {
         Queue::fake();
 
-        $gateway = Mockery::mock(CampayGateway::class);
+        $gateway = Mockery::mock(NotchPayGateway::class);
 
         $gateway->shouldReceive('validateWebhookSignature')
             ->once()
             ->andReturn(true);
 
-        $this->app->instance(CampayGateway::class, $gateway);
+        $this->app->instance(NotchPayGateway::class, $gateway);
 
         $payload = [
-            'reference' => 'REF123',
-            'status' => 'SUCCESSFUL',
-            'signature' => 'valid.jwt.token',
+            'event' => 'payment.complete',
+            'data' => [
+                'reference' => 'REF123',
+                'status' => 'complete',
+            ],
         ];
 
-        $response = $this->postJson('/api/v1/webhooks/campay', $payload);
+        $response = $this->postJson('/api/v1/webhooks/notchpay', $payload);
 
         $response->assertStatus(200);
 
-        Queue::assertPushed(ProcessCampayWebhookJob::class);
+        Queue::assertPushed(ProcessPaymentWebhookJob::class);
     }
 
-    public function test_real_campay_jwt_signature_is_verified(): void
+    public function test_real_notchpay_hmac_signature_is_verified(): void
     {
         Queue::fake();
 
-        config(['campay.webhook_secret' => 'test-secret']);
-        config(['payment.campay.webhook_verify_signature' => true]);
+        config(['services.notchpay.webhook_hash' => 'test-hash-key']);
+        config(['payment.notchpay.webhook_verify_signature' => true]);
 
-        $header = $this->base64UrlEncode(json_encode(['alg' => 'HS256', 'app' => 'eec signcard', 'typ' => 'JWT']));
-        $claims = $this->base64UrlEncode(json_encode([
-            'iat' => now()->timestamp,
-            'nbf' => now()->timestamp,
-            'exp' => now()->addHour()->timestamp,
-            'source' => 'CamPay',
-        ]));
-        $signature = $this->base64UrlEncode(hash_hmac('sha256', "{$header}.{$claims}", 'test-secret', true));
-        $jwt = "{$header}.{$claims}.{$signature}";
+        $payload = [
+            'id' => 'whk.test',
+            'event' => 'payment.complete',
+            'data' => [
+                'reference' => 'REF123',
+                'status' => 'complete',
+                'currency' => 'XAF',
+            ],
+        ];
+        $rawBody = json_encode($payload);
+        $signature = hash_hmac('sha256', $rawBody, 'test-hash-key');
 
-        $response = $this->postJson('/api/v1/webhooks/campay', [
-            'reference' => 'REF123',
-            'status' => 'SUCCESSFUL',
-            'signature' => $jwt,
-        ]);
+        $response = $this->withHeaders(['x-notch-signature' => $signature])
+            ->postJson('/api/v1/webhooks/notchpay', $payload);
 
         $response->assertStatus(200);
-        Queue::assertPushed(ProcessCampayWebhookJob::class);
-    }
-
-    private function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+        Queue::assertPushed(ProcessPaymentWebhookJob::class);
     }
 }

@@ -36,11 +36,11 @@ class PaymentRepository implements PaymentRepositoryInterface
     }
 
     /**
-     * Récupérer un paiement par référence Campay
+     * Récupérer un paiement par référence de paiement
      */
-    public function findByCampayReference(string $reference): ?PaymentEntity
+    public function findByPaymentReference(string $reference): ?PaymentEntity
     {
-        $model = PaymentTransaction::where('campay_reference', $reference)->first();
+        $model = PaymentTransaction::where('payment_reference', $reference)->first();
 
         return $model ? $this->modelToEntity($model) : null;
     }
@@ -76,7 +76,7 @@ class PaymentRepository implements PaymentRepositoryInterface
 
         $model->update([
             'status' => $status,
-            'campay_metadata' => array_merge($model->campay_metadata ?? [], $metadata),
+            'payment_metadata' => array_merge($model->payment_metadata ?? [], $metadata),
         ]);
 
         return $this->modelToEntity($model);
@@ -120,8 +120,8 @@ class PaymentRepository implements PaymentRepositoryInterface
             paymentNumber: $model->paymentNumber,
             signatureType: $model->signatureType,
             status: $model->status,
-            campayReference: $model->campay_reference,
-            campayMetadata: $model->campay_metadata ?? [],
+            paymentReference: $model->payment_reference,
+            paymentMetadata: $model->payment_metadata ?? [],
             createdAt: $model->created_at,
             completedAt: $model->updated_at && $model->status === 'completed' ? $model->updated_at : null,
         );

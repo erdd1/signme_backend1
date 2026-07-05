@@ -39,7 +39,7 @@ class SignatureFactory extends Factory
             'ancienId'       => null,
             'ancienNom'      => null,
 
-            'campay_reference' => null,
+            'payment_reference' => null,
         ];
     }
 

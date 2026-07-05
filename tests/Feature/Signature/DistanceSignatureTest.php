@@ -27,7 +27,8 @@ class DistanceSignatureTest extends TestCase
             'Bearer '.$token
         )->postJson('/api/v1/signatures/distance', [
             'amount' => 100,
-            'paymentMethod' => 'ORANGE MONEY',
+            'paymentMethod' => 'mobile_money',
+            'paymentOperator' => 'ORANGE MONEY',
             'phoneNumber' => '699803165',
         ]);
 
@@ -50,7 +51,8 @@ class DistanceSignatureTest extends TestCase
             'Bearer '.$token
         )->postJson('/api/v1/signatures/distance', [
             'months' => ['2026-01'],
-            'paymentMethod' => 'ORANGE MONEY',
+            'paymentMethod' => 'mobile_money',
+            'paymentOperator' => 'ORANGE MONEY',
             'phoneNumber' => '699803165',
         ]);
 
@@ -74,6 +76,31 @@ class DistanceSignatureTest extends TestCase
         )->postJson('/api/v1/signatures/distance', [
             'months' => ['2026-01'],
             'amount' => 100,
+            'paymentOperator' => 'ORANGE MONEY',
+            'phoneNumber' => '699803165',
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_payment_operator_is_required_for_mobile_money(): void
+    {
+        $church = Church::factory()->create();
+
+        $user = User::factory()->create([
+            'role' => 'paroissien',
+            'churchId' => $church->id,
+        ]);
+
+        $token = $user->createToken('test')->plainTextToken;
+
+        $response = $this->withHeader(
+            'Authorization',
+            'Bearer '.$token
+        )->postJson('/api/v1/signatures/distance', [
+            'months' => ['2026-01'],
+            'amount' => 100,
+            'paymentMethod' => 'mobile_money',
             'phoneNumber' => '699803165',
         ]);
 
@@ -97,7 +124,8 @@ class DistanceSignatureTest extends TestCase
         )->postJson('/api/v1/signatures/distance', [
             'months' => ['2026-01'],
             'amount' => 100,
-            'paymentMethod' => 'ORANGE MONEY',
+            'paymentMethod' => 'mobile_money',
+            'paymentOperator' => 'ORANGE MONEY',
         ]);
 
         $response->assertStatus(422);
@@ -120,7 +148,8 @@ class DistanceSignatureTest extends TestCase
         )->postJson('/api/v1/signatures/distance', [
             'months' => ['2026-01'],
             'amount' => 12345,
-            'paymentMethod' => 'ORANGE MONEY',
+            'paymentMethod' => 'mobile_money',
+            'paymentOperator' => 'ORANGE MONEY',
             'phoneNumber' => '699803165',
         ]);
 
@@ -132,7 +161,8 @@ class DistanceSignatureTest extends TestCase
         $response = $this->postJson('/api/v1/signatures/distance', [
             'months' => ['2026-01'],
             'amount' => 100,
-            'paymentMethod' => 'ORANGE MONEY',
+            'paymentMethod' => 'mobile_money',
+            'paymentOperator' => 'ORANGE MONEY',
             'phoneNumber' => '699803165',
         ]);
 

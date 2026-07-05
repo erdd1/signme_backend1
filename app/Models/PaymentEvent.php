@@ -26,6 +26,7 @@ class PaymentEvent extends Model
     public const TYPE_FAILED          = 'failed';
     public const TYPE_EXPIRED         = 'expired';
     public const TYPE_MANUAL_RECHECK  = 'manual_recheck';
+    public const TYPE_ADMIN_OVERRIDE  = 'admin_override';
 
     protected $fillable = [
         'payment_transaction_id',

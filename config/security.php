@@ -72,6 +72,18 @@ return [
             'max_attempts'    => 20,
             'decay_minutes'   => 60,
         ],
+
+        // Webhook NotchPay : max 60 par minute (par IP), anti-flood
+        'webhook' => [
+            'max_attempts'    => 60,
+            'decay_minutes'   => 1,
+        ],
+
+        // Initiation de paiement (signature/contribution) : max 10 par 5 min (par user)
+        'payment_initiation' => [
+            'max_attempts'    => 10,
+            'decay_minutes'   => 5,
+        ],
     ],
 
     /*

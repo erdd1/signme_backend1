@@ -31,17 +31,20 @@ class AdminSeeder extends Seeder
         $this->command->info("✅ Église créée : {$siege->nom}");
 
         // Créer le compte administrateur système
-        $admin = User::firstOrCreate(
-            ['email' => 'admin@eec.cm'],
-            [
-                'nom'            => 'Administrateur EEC',
-                'password'       => Hash::make('Admin@EEC2026'),
-                'role'           => User::ROLE_ADMIN,
-                'churchId'       => $siege->id,
-                'actif'          => true,
-                'est_de_service' => false,
-            ]
-        );
+        // 'role' est NOT NULL sans défaut en base : il doit être posé
+        // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
+        $admin = User::where('email', 'admin@eec.cm')->first();
+        if (!$admin) {
+            $admin = new User([
+                'nom'      => 'Administrateur EEC',
+                'password' => Hash::make('Admin@EEC2026'),
+                'churchId' => $siege->id,
+            ]);
+        }
+        $admin->role = User::ROLE_ADMIN;
+        $admin->actif = true;
+        $admin->est_de_service = false;
+        $admin->save();
 
         $this->command->info("✅ Admin créé : {$admin->email} / mot de passe : Admin@EEC2026");
         $this->command->warn("⚠️  Changez le mot de passe admin en production !");

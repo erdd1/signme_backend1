@@ -28,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * @property string      $status           pending|completed|failed
  * @property int|null    $ancienId
  * @property string|null $ancienNom
- * @property string|null $campay_reference
+ * @property string|null $payment_reference
  */
 class Signature extends Model
 {
@@ -60,7 +60,7 @@ class Signature extends Model
         'status',
         'ancienId',
         'ancienNom',
-        'campay_reference',
+        'payment_reference',
     ];
 
     protected function casts(): array

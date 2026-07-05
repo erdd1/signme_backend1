@@ -2,6 +2,7 @@
 
 namespace App\Modules\Badge\Application\Services;
 
+use App\Models\Evenement;
 use App\Models\Publication;
 use App\Models\PublicationRead;
 use App\Models\Signature;
@@ -10,26 +11,29 @@ use App\Models\User;
 /**
  * BadgeService — Calcul des compteurs de badges non lus
  *
- * Gère trois types de badges :
+ * Gère quatre types de badges :
  *  - publications       : Publications de l'église non lues par l'utilisateur (onglet Home)
+ *  - evenements         : Événements de l'église non lus par l'utilisateur (onglet Home, combiné avec publications)
  *  - historique         : Signatures completed de l'utilisateur depuis sa dernière visite (onglet Historique)
  *  - historique_signatures : Signatures effectuées PAR l'utilisateur (ancien/pasteur) depuis sa dernière visite
  */
 class BadgeService
 {
     public const TYPE_PUBLICATIONS             = 'publications';
+    public const TYPE_EVENEMENTS               = 'evenements';
     public const TYPE_HISTORIQUE               = 'historique';
     public const TYPE_HISTORIQUE_SIGNATURES    = 'historique_signatures';
 
     /**
      * Retourne les compteurs de badges pour l'utilisateur connecté.
      *
-     * @return array{publications: int, historique: int, historique_signatures: int}
+     * @return array{publications: int, evenements: int, historique: int, historique_signatures: int}
      */
     public function getBadgeCounts(User $user): array
     {
         return [
             self::TYPE_PUBLICATIONS          => $this->countUnreadPublications($user),
+            self::TYPE_EVENEMENTS             => $this->countUnreadEvenements($user),
             self::TYPE_HISTORIQUE            => $this->countUnreadHistorique($user),
             self::TYPE_HISTORIQUE_SIGNATURES => $this->countUnreadHistoriqueSignatures($user),
         ];
@@ -38,12 +42,13 @@ class BadgeService
     /**
      * Marque un type de badge comme lu pour l'utilisateur.
      *
-     * @param string $type publications | historique | historique_signatures
+     * @param string $type publications | evenements | historique | historique_signatures
      */
     public function markAsRead(User $user, string $type): void
     {
         match ($type) {
             self::TYPE_PUBLICATIONS          => $this->markPublicationsAsRead($user),
+            self::TYPE_EVENEMENTS             => $this->markEvenementsAsRead($user),
             self::TYPE_HISTORIQUE            => $this->markHistoriqueAsRead($user),
             self::TYPE_HISTORIQUE_SIGNATURES => $this->markHistoriqueSignaturesAsRead($user),
             default                          => null,
@@ -103,6 +108,40 @@ class BadgeService
 
         // insertOrIgnore évite les doublons en cas d'appels concurrents
         PublicationRead::insertOrIgnore($rows);
+    }
+
+    // ─── Événements ─────────────────────────────────────────────────────────
+
+    /**
+     * Compte les événements de l'église (actif/terminé, comme le fil
+     * d'actualité — cf. EvenementService::list()) publiés après la dernière
+     * visite de l'utilisateur, en excluant ses propres événements (un auteur
+     * ne doit pas voir un badge pour son propre contenu).
+     */
+    private function countUnreadEvenements(User $user): int
+    {
+        if ($user->isAdmin()) {
+            return 0; // Cohérent avec le badge publications : pas de badge pour l'admin
+        }
+
+        $query = Evenement::where('churchId', $user->churchId)
+            ->whereIn('statut', [Evenement::STATUT_ACTIF, Evenement::STATUT_TERMINE])
+            ->whereNotNull('publishedAt')
+            ->where('auteurId', '!=', $user->id);
+
+        if ($user->last_read_evenements_at !== null) {
+            $query->where('publishedAt', '>', $user->last_read_evenements_at);
+        }
+
+        return $query->count();
+    }
+
+    /**
+     * Met à jour last_read_evenements_at = now() pour l'utilisateur.
+     */
+    private function markEvenementsAsRead(User $user): void
+    {
+        $user->update(['last_read_evenements_at' => now()]);
     }
 
     // ─── Historique Personnel ─────────────────────────────────────────────────

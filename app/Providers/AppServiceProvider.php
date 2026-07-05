@@ -16,11 +16,21 @@ use App\Modules\Signature\Application\Services\SignatureService;
 use App\Modules\Payment\Application\PaymentService;
 use App\Modules\Payment\Domain\PaymentRepositoryInterface;
 use App\Modules\Payment\Infrastructure\PaymentRepository;
-use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
+use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use App\Modules\Publication\Application\Services\PublicationService;
 use App\Modules\AncienDesignation\Application\Services\AncienDesignationService;
 use App\Modules\Rapport\Application\Services\RapportService;
+use App\Modules\Evenement\Application\Services\EvenementService;
+use App\Modules\Evenement\Application\Services\ContributionService;
+use App\Modules\Evenement\Application\Services\ContributionPollingDispatcher;
+use App\Modules\Evenement\Application\Services\MesContributionsService;
+use App\Modules\UserLookup\Application\Services\GroupeService;
+use App\Modules\UserLookup\Application\Services\QuartierService;
+use App\Modules\UserLookup\Application\Services\VilleService;
+use App\Modules\Push\Application\Services\DeviceTokenService;
+use App\Modules\Push\Application\Services\PushNotificationService;
 use App\Core\Services\CloudinaryService;
+use App\Core\Services\PaymentQueueHealthService;
 
 /**
  * AppServiceProvider — EEC SignCard
@@ -49,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
 
         // ─── Services communs ─────────────────────────────────────────────────
         $this->app->singleton(CloudinaryService::class);
+        $this->app->singleton(PaymentQueueHealthService::class);
 
         // ─── Module Auth ──────────────────────────────────────────────────────
         $this->app->singleton(\App\Modules\Auth\Application\Services\GoogleTokenVerifier::class);
@@ -72,9 +83,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Modules\Auth\Application\Services\RateLimitService::class);
         $this->app->singleton(\App\Modules\Auth\Application\Services\PasswordResetOTPService::class);
 
-        // ─── Module Payment (files Redis Campay) ─────────────────────────────
+        // ─── Module Payment (files Redis NotchPay) ────────────────────────────
         $this->app->singleton(\App\Modules\Payment\Application\Services\PaymentPollingDispatcher::class);
-        $this->app->singleton(\App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway::class);
         $this->app->singleton(\App\Modules\Auth\Application\Services\SecurityLogService::class);
 
         // ─── Services de sécurité (PHASE 2) ────────────────────────────────
@@ -110,21 +120,22 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
-        // ─── Module Payment (Campay) ──────────────────────────────────────────
+        // ─── Module Payment (NotchPay) ──────────────────────────────────────────
         $this->app->bind(PaymentRepositoryInterface::class, PaymentRepository::class);
-        $this->app->singleton(CampayGateway::class, fn () => new CampayGateway());
+        $this->app->singleton(NotchPayGateway::class, fn () => new NotchPayGateway());
         $this->app->singleton(PaymentService::class, function ($app) {
             return new PaymentService(
                 $app->make(PaymentRepositoryInterface::class),
-                $app->make(CampayGateway::class),
+                $app->make(NotchPayGateway::class),
             );
         });
         // ─── Module Signature ─────────────────────────────────────────────────
         $this->app->singleton(SignatureService::class, function ($app) {
             return new SignatureService(
-                $app->make(CampayGateway::class),
+                $app->make(NotchPayGateway::class),
                 $app->make(AncienDesignationService::class),
                 $app->make(\App\Modules\Payment\Application\Services\PaymentPollingDispatcher::class),
+                $app->make(PaymentQueueHealthService::class),
             );
         });
 
@@ -136,6 +147,34 @@ class AppServiceProvider extends ServiceProvider
 
         // ─── Module Rapport ───────────────────────────────────────────────────
         $this->app->singleton(RapportService::class);
+
+        // ─── Module UserLookup (listes gérées Groupe/Quartier/Ville) ──────────
+        $this->app->singleton(GroupeService::class);
+        $this->app->singleton(QuartierService::class);
+        $this->app->singleton(VilleService::class);
+
+        // ─── Module Push (notifications FCM) ───────────────────────────────────
+        $this->app->singleton(DeviceTokenService::class);
+        $this->app->singleton(PushNotificationService::class);
+
+        // ─── Module Evenement (collecte de fonds) ─────────────────────────────
+        $this->app->singleton(EvenementService::class, function ($app) {
+            return new EvenementService(
+                $app->make(CloudinaryService::class),
+            );
+        });
+
+        $this->app->singleton(ContributionPollingDispatcher::class);
+
+        $this->app->singleton(ContributionService::class, function ($app) {
+            return new ContributionService(
+                $app->make(NotchPayGateway::class),
+                $app->make(ContributionPollingDispatcher::class),
+                $app->make(PaymentQueueHealthService::class),
+            );
+        });
+
+        $this->app->singleton(MesContributionsService::class);
     }
 
     /**

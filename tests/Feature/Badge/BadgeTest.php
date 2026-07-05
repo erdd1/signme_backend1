@@ -4,11 +4,13 @@ namespace Tests\Feature\Badge;
 
 use Tests\TestCase;
 use App\Models\Church;
+use App\Models\Evenement;
 use App\Models\Publication;
 use App\Models\PublicationRead;
 use App\Models\Signature;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 
 /**
  * BadgeTest — Tests Feature pour GET /api/v1/notifications/badges
@@ -82,6 +84,20 @@ class BadgeTest extends TestCase
         ], $overrides));
     }
 
+    private function createEvenement(User $auteur, Church $church, array $overrides = []): Evenement
+    {
+        return Evenement::create(array_merge([
+            'uuid'        => (string) Str::uuid(),
+            'churchId'    => $church->id,
+            'auteurId'    => $auteur->id,
+            'titre'       => 'Test événement',
+            'description' => str_repeat('a', 25),
+            'statut'      => Evenement::STATUT_ACTIF,
+            'dateDebut'   => now(),
+            'publishedAt' => now(),
+        ], $overrides));
+    }
+
     private function createSignature(User $user, User $ancien, string $status = 'completed'): Signature
     {
         return Signature::create([
@@ -132,6 +148,7 @@ class BadgeTest extends TestCase
                 'success',
                 'data' => [
                     'publications',
+                    'evenements',
                     'historique',
                     'historique_signatures',
                 ],
@@ -148,6 +165,7 @@ class BadgeTest extends TestCase
 
         $response->assertStatus(200)
             ->assertJsonPath('data.publications', 0)
+            ->assertJsonPath('data.evenements', 0)
             ->assertJsonPath('data.historique', 0)
             ->assertJsonPath('data.historique_signatures', 0);
     }
@@ -224,7 +242,7 @@ class BadgeTest extends TestCase
         $response = $this->markRead($member, 'publications');
 
         $response->assertStatus(200)
-            ->assertJsonStructure(['success', 'data' => ['publications', 'historique', 'historique_signatures']]);
+            ->assertJsonStructure(['success', 'data' => ['publications', 'evenements', 'historique', 'historique_signatures']]);
     }
 
     public function test_multiple_publications_all_count_as_unread(): void
@@ -255,6 +273,86 @@ class BadgeTest extends TestCase
         $response = $this->getBadges($member);
 
         $response->assertJsonPath('data.publications', 0);
+    }
+
+    // =========================================================================
+    // Tests — Badge Événements
+    // =========================================================================
+
+    public function test_evenement_badge_increases_when_evenement_exists(): void
+    {
+        $church  = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church->id);
+        $member  = $this->makeUser('paroissien', $church->id);
+
+        $this->createEvenement($pasteur, $church);
+
+        $response = $this->getBadges($member);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.evenements', 1);
+    }
+
+    public function test_author_does_not_see_badge_for_own_evenement(): void
+    {
+        $church  = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church->id);
+
+        $this->createEvenement($pasteur, $church);
+
+        $response = $this->getBadges($pasteur);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.evenements', 0);
+    }
+
+    public function test_mark_evenements_as_read_resets_badge_to_zero(): void
+    {
+        $church  = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church->id);
+        $member  = $this->makeUser('paroissien', $church->id);
+
+        $this->createEvenement($pasteur, $church);
+
+        $this->getBadges($member)->assertJsonPath('data.evenements', 1);
+
+        $response = $this->markRead($member, 'evenements');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.evenements', 0);
+
+        $member->refresh();
+        $this->assertNotNull($member->last_read_evenements_at);
+    }
+
+    public function test_evenement_badge_only_counts_own_church_evenements(): void
+    {
+        $church1 = $this->makeChurch();
+        $church2 = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church1->id);
+        $member  = $this->makeUser('paroissien', $church2->id);
+
+        $this->createEvenement($pasteur, $church1);
+
+        $response = $this->getBadges($member);
+
+        $response->assertJsonPath('data.evenements', 0);
+    }
+
+    public function test_draft_evenement_does_not_count_for_badge(): void
+    {
+        $church  = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church->id);
+        $member  = $this->makeUser('paroissien', $church->id);
+
+        $this->createEvenement($pasteur, $church, [
+            'statut'      => Evenement::STATUT_BROUILLON,
+            'publishedAt' => null,
+        ]);
+
+        $response = $this->getBadges($member);
+
+        $response->assertJsonPath('data.evenements', 0);
     }
 
     // =========================================================================
@@ -445,7 +543,7 @@ class BadgeTest extends TestCase
         $church = $this->makeChurch();
         $ancien = $this->makeUser('ancien', $church->id);
 
-        foreach (['publications', 'historique', 'historique_signatures'] as $type) {
+        foreach (['publications', 'evenements', 'historique', 'historique_signatures'] as $type) {
             $response = $this->markRead($ancien, $type);
             $response->assertStatus(200);
         }

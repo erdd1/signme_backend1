@@ -2,13 +2,17 @@
 
 namespace App\Modules\User\Application\Services;
 
-use App\Models\User;
 use App\Models\Church;
+use App\Models\Groupe;
+use App\Models\Quartier;
+use App\Models\User;
+use App\Models\Ville;
 use App\Core\Exceptions\ApiException;
 use App\Core\Services\CloudinaryService;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Service User — Gestion des membres EEC
@@ -27,6 +31,9 @@ class UserService
     /** Rôles qu'un pasteur peut créer */
     private const ROLES_PASTEUR = ['secretaire', 'tresorier', 'ancien', 'paroissien'];
 
+    /** Relations chargées systématiquement pour la sérialisation (UserResource) */
+    private const RELATIONS = ['church', 'quartier', 'ville', 'groupePrincipal', 'groupes'];
+
     public function __construct(
         private readonly CloudinaryService $cloudinaryService
     ) {}
@@ -35,12 +42,13 @@ class UserService
      * Liste les membres filtrés selon le rôle de l'utilisateur connecté.
      *
      * @param User  $authUser   Utilisateur faisant la requête
-     * @param array $filters    Filtres : role, actif, search, church_id
+     * @param array $filters    Filtres : role, actif, search, church_id, sexe,
+     *                          moisNaissance, quartierId, villeId, groupeId, originaireDe
      * @param int   $perPage
      */
     public function list(User $authUser, array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
-        $query = User::with('church')->orderBy('nom');
+        $query = User::with(self::RELATIONS)->orderBy('nom');
 
         // ─── Restriction par église ────────────────────────────────────────────
         if (!$authUser->isAdmin()) {
@@ -69,6 +77,32 @@ class UserService
             });
         }
 
+        // ─── Filtres démographiques (tableau de bord "Gérer utilisateurs") ────
+        if (!empty($filters['sexe'])) {
+            $query->where('sexe', $filters['sexe']);
+        }
+
+        if (!empty($filters['moisNaissance'])) {
+            $query->whereMonth('dateNaissance', (int) $filters['moisNaissance']);
+        }
+
+        if (!empty($filters['quartierId'])) {
+            $query->where('quartierResidenceId', $filters['quartierId']);
+        }
+
+        if (!empty($filters['villeId'])) {
+            $query->where('villeResidenceId', $filters['villeId']);
+        }
+
+        if (!empty($filters['groupeId'])) {
+            $groupeId = $filters['groupeId'];
+            $query->whereHas('groupes', fn ($q) => $q->where('groupes.id', $groupeId));
+        }
+
+        if (!empty($filters['originaireDe'])) {
+            $query->where('originaireDe', $filters['originaireDe']);
+        }
+
         return $query->paginate($perPage);
     }
 
@@ -92,23 +126,51 @@ class UserService
             throw ApiException::conflict("Un compte avec l'email \"{$data['email']}\" existe déjà.");
         }
 
-        // ─── Créer l'utilisateur ──────────────────────────────────────────────
-        $user = User::create([
-            'nom'               => $data['nom'],
-            'email'             => $data['email'],
-            'password'          => $data['password'] ?? 'EEC@' . rand(10000, 99999),
-            'role'              => $data['role'],
-            'churchId'          => $churchId,
-            'actif'             => true,
-            'est_de_service'    => false,
-            'telephone'         => $data['telephone'] ?? null,
-            'quartierResidence' => $data['quartierResidence'] ?? null,
-            'profession'        => $data['profession'] ?? null,
-            'groupe'            => $data['groupe'] ?? null,
-            'originaireDe'      => $data['originaireDe'] ?? null,
-            'dateConfirmation'  => $data['dateConfirmation'] ?? null,
-            'lieuConfirmation'  => $data['lieuConfirmation'] ?? null,
-        ]);
+        $groupeIds = $data['groupeIds'] ?? [];
+        $groupePrincipalId = $data['groupePrincipalId'] ?? null;
+
+        if ($churchId) {
+            $this->assertLookupsBelongToChurch(
+                $churchId,
+                $data['quartierId'] ?? null,
+                $data['villeId'] ?? null,
+                $groupeIds
+            );
+        }
+        $this->assertGroupePrincipalCoherent($groupeIds, $groupePrincipalId);
+
+        $user = DB::transaction(function () use ($data, $churchId, $groupeIds, $groupePrincipalId) {
+            // 'role' est NOT NULL sans défaut en base : il doit être posé
+            // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
+            $user = new User([
+                'nom'                 => $data['nom'],
+                'email'               => $data['email'],
+                'password'            => $data['password'] ?? 'EEC@' . rand(10000, 99999),
+                'churchId'            => $churchId,
+                'telephone'           => $data['telephone'] ?? null,
+                'profession'          => $data['profession'] ?? null,
+                'originaireDe'        => $data['originaireDe'] ?? null,
+                'dateConfirmation'    => $data['dateConfirmation'] ?? null,
+                'lieuConfirmation'    => $data['lieuConfirmation'] ?? null,
+                'sexe'                => $data['sexe'] ?? null,
+                'dateNaissance'       => $data['dateNaissance'] ?? null,
+                'quartierResidenceId' => $data['quartierId'] ?? null,
+                'villeResidenceId'    => $data['villeId'] ?? null,
+                'groupePrincipalId'   => $groupePrincipalId,
+            ]);
+
+            // Champs sensibles : assignation explicite (non mass-assignable).
+            $user->role = $data['role'];
+            $user->actif = true;
+            $user->est_de_service = false;
+            $user->save();
+
+            if (!empty($groupeIds)) {
+                $user->groupes()->sync($groupeIds);
+            }
+
+            return $user;
+        });
 
         // ─── Si c'est un pasteur, lier à l'église ─────────────────────────────
         if ($user->role === User::ROLE_PASTEUR && $churchId) {
@@ -118,7 +180,7 @@ class UserService
             ]);
         }
 
-        return $user->load('church');
+        return $user->load(self::RELATIONS);
     }
 
     /**
@@ -130,7 +192,7 @@ class UserService
      */
     public function findById(User $authUser, int $targetId): User
     {
-        $user = User::with('church')->find($targetId);
+        $user = User::with(self::RELATIONS)->find($targetId);
 
         if (!$user) throw ApiException::notFound('Utilisateur');
 
@@ -166,27 +228,76 @@ class UserService
         // La photo passe uniquement par POST /users/{id}/photo (Cloudinary).
         unset($data['photoUrl'], $data['photo_url']);
 
+        $churchId = $user->churchId;
+
+        // ─── Groupes multiples : null = "non fourni" (inchangé), [] = "vider" ──
+        $groupeIds = array_key_exists('groupeIds', $data) ? ($data['groupeIds'] ?? []) : null;
+        $groupePrincipalId = array_key_exists('groupePrincipalId', $data)
+            ? $data['groupePrincipalId']
+            : $user->groupePrincipalId;
+
+        $effectiveGroupeIds = $groupeIds ?? $user->groupes()->pluck('groupes.id')->toArray();
+
+        if ($churchId) {
+            $this->assertLookupsBelongToChurch(
+                $churchId,
+                array_key_exists('quartierId', $data) ? $data['quartierId'] : null,
+                array_key_exists('villeId', $data) ? $data['villeId'] : null,
+                $groupeIds ?? []
+            );
+        }
+        $this->assertGroupePrincipalCoherent($effectiveGroupeIds, $groupePrincipalId);
+
         $updateData = array_filter([
             'nom'               => $data['nom']               ?? null,
             'email'             => $data['email']             ?? null,
-            'role'              => $data['role']              ?? null,
             'telephone'         => $data['telephone']         ?? null,
-            'quartierResidence' => $data['quartierResidence'] ?? null,
             'profession'        => $data['profession']        ?? null,
-            'groupe'            => $data['groupe']            ?? null,
             'originaireDe'      => $data['originaireDe']      ?? null,
             'dateConfirmation'  => $data['dateConfirmation']  ?? null,
             'lieuConfirmation'  => $data['lieuConfirmation']  ?? null,
-        ], fn($v) => !is_null($v));
+        ], fn ($v) => !is_null($v));
+
+        // Champs démographiques : appliqués dès qu'ils sont présents dans la
+        // requête (même à null, ex. retirer un quartier), pas seulement non-vides.
+        $nullableFields = [
+            'sexe'        => 'sexe',
+            'dateNaissance' => 'dateNaissance',
+            'quartierId'  => 'quartierResidenceId',
+            'villeId'     => 'villeResidenceId',
+        ];
+        foreach ($nullableFields as $inputKey => $column) {
+            if (array_key_exists($inputKey, $data)) {
+                $updateData[$column] = $data[$inputKey];
+            }
+        }
+
+        if (array_key_exists('groupePrincipalId', $data) || $groupeIds !== null) {
+            $updateData['groupePrincipalId'] = $groupePrincipalId;
+        }
 
         // Changement mots de passe si fourni
         if (!empty($data['password'])) {
             $updateData['password'] = $data['password'];
         }
 
-        $user->update($updateData);
+        $newRole = $data['role'] ?? null;
 
-        return $user->fresh('church');
+        DB::transaction(function () use ($user, $updateData, $groupeIds, $newRole) {
+            $user->update($updateData);
+
+            // Champ sensible : assignation explicite (non mass-assignable).
+            if ($newRole !== null) {
+                $user->role = $newRole;
+                $user->save();
+            }
+
+            if ($groupeIds !== null) {
+                $user->groupes()->sync($groupeIds);
+            }
+        });
+
+        return $user->fresh(self::RELATIONS);
     }
 
     /**
@@ -253,7 +364,8 @@ class UserService
             );
         }
 
-        $user->update(['actif' => !$user->actif]);
+        $user->actif = !$user->actif;
+        $user->save();
 
         // Si désactivé : révoquer tous ses tokens
         if (!$user->actif) {
@@ -295,6 +407,46 @@ class UserService
         $user->delete();
     }
 
+    /**
+     * Statistiques démographiques pour le tableau de bord "Gérer utilisateurs" :
+     * total fidèles, répartition Cameroun/Diaspora, répartition Hommes/Femmes.
+     *
+     * @throws ApiException
+     */
+    public function stats(User $authUser, ?int $churchId = null): array
+    {
+        $egliseId = $this->resolveChurchIdOrDefault($authUser, $churchId);
+        $cacheKey = "users:stats:{$egliseId}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(3), function () use ($egliseId) {
+            $totals = User::where('churchId', $egliseId)
+                ->selectRaw(
+                    'COUNT(*) as total,
+                     SUM(CASE WHEN sexe = ? THEN 1 ELSE 0 END) as hommes,
+                     SUM(CASE WHEN sexe = ? THEN 1 ELSE 0 END) as femmes',
+                    [User::SEXE_HOMME, User::SEXE_FEMME]
+                )
+                ->first();
+
+            $auCameroun = User::where('churchId', $egliseId)
+                ->whereHas('ville', fn ($q) => $q->where('estDiaspora', false))
+                ->count();
+
+            $horsCameroun = User::where('churchId', $egliseId)
+                ->whereHas('ville', fn ($q) => $q->where('estDiaspora', true))
+                ->count();
+
+            return [
+                'eglise_id'     => $egliseId,
+                'total_fideles' => (int) ($totals->total ?? 0),
+                'hommes'        => (int) ($totals->hommes ?? 0),
+                'femmes'        => (int) ($totals->femmes ?? 0),
+                'au_cameroun'   => $auCameroun,
+                'hors_cameroun' => $horsCameroun,
+            ];
+        });
+    }
+
     // ─── Helpers privés ───────────────────────────────────────────────────────
 
     private function assertCanCreateRole(User $authUser, string $role): void
@@ -323,6 +475,66 @@ class UserService
 
         // Autres rôles : le membre rejoint l'église du créateur
         return $authUser->churchId;
+    }
+
+    private function resolveChurchIdOrDefault(User $authUser, ?int $churchId): int
+    {
+        if ($authUser->isAdmin()) {
+            $id = $churchId ?? $authUser->churchId;
+            if (!$id) {
+                throw ApiException::badRequest('Veuillez spécifier une église (church_id).');
+            }
+            return $id;
+        }
+
+        return $authUser->churchId;
+    }
+
+    /**
+     * Vérifie que le quartier/la ville/les groupes sélectionnés appartiennent
+     * bien à l'église du membre (évite qu'un membre soit rattaché à une liste
+     * gérée d'une autre église).
+     *
+     * @throws ApiException
+     */
+    private function assertLookupsBelongToChurch(
+        int $churchId,
+        ?int $quartierId,
+        ?int $villeId,
+        array $groupeIds
+    ): void {
+        if ($quartierId && !Quartier::where('id', $quartierId)->where('churchId', $churchId)->exists()) {
+            throw ApiException::badRequest('Ce quartier n\'appartient pas à votre église.');
+        }
+
+        if ($villeId && !Ville::where('id', $villeId)->where('churchId', $churchId)->exists()) {
+            throw ApiException::badRequest('Cette ville n\'appartient pas à votre église.');
+        }
+
+        if (!empty($groupeIds)) {
+            $uniqueIds = array_unique($groupeIds);
+            $count = Groupe::whereIn('id', $uniqueIds)->where('churchId', $churchId)->count();
+            if ($count !== count($uniqueIds)) {
+                throw ApiException::badRequest('Un ou plusieurs groupes sélectionnés n\'appartiennent pas à votre église.');
+            }
+        }
+    }
+
+    /**
+     * Le groupe principal doit obligatoirement faire partie des groupes
+     * sélectionnés par le membre.
+     *
+     * @throws ApiException
+     */
+    private function assertGroupePrincipalCoherent(array $groupeIds, ?int $groupePrincipalId): void
+    {
+        if ($groupePrincipalId === null) {
+            return;
+        }
+
+        if (empty($groupeIds) || !in_array($groupePrincipalId, $groupeIds, true)) {
+            throw ApiException::badRequest('Le groupe principal doit faire partie des groupes sélectionnés.');
+        }
     }
 
     /**

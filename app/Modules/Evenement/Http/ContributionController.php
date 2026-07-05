@@ -8,6 +8,7 @@ use App\Core\Traits\ApiResponseTrait;
 use App\Models\Contribution;
 use App\Models\PaymentEvent;
 use App\Models\PaymentSyncLog;
+use App\Modules\Auth\Application\Services\RateLimitService;
 use App\Modules\Evenement\Application\Services\ContributionService;
 use App\Modules\Evenement\Http\Requests\CreateContributionRequest;
 use App\Modules\Evenement\Http\Resources\ContributionDetailResource;
@@ -40,10 +41,14 @@ class ContributionController extends Controller
         private readonly ContributionService $contributionService,
         private readonly NotchPayGateway $notchPayGateway,
         private readonly PaymentReceiptService $paymentReceiptService,
+        private readonly RateLimitService $rateLimitService,
     ) {}
 
     public function store(CreateContributionRequest $request, string $uuid): JsonResponse
     {
+        $this->rateLimitService->ensureWithinLimit('payment_initiation', (string) $request->user()->id);
+        $this->rateLimitService->incrementRateLimit('payment_initiation', (string) $request->user()->id);
+
         $contribution = $this->contributionService->initiate($request->user(), $uuid, $request->validated());
 
         $message = $contribution->paymentMethod === Contribution::METHOD_CARD

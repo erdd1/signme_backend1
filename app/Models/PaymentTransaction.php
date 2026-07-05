@@ -8,11 +8,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Modèle PaymentTransaction — Log paiements Campay
+ * Modèle PaymentTransaction — Log paiements (NotchPay)
  */
 class PaymentTransaction extends Model
 {
     use HasFactory;
+
+    public const METHOD_MOBILE_MONEY = 'mobile_money';
+    public const METHOD_CARD         = 'card';
+
+    public const PAYMENT_METHODS = [
+        self::METHOD_MOBILE_MONEY,
+        self::METHOD_CARD,
+    ];
 
     protected $table = 'payment_transactions';
 
@@ -21,16 +29,17 @@ class PaymentTransaction extends Model
         'churchId',
         'paymentOperator',
         'paymentNumber',
+        'paymentMethod',
         'amountPerMonth',
         'monthsCount',
         'totalAmount',
         'fees',
         'amountCharged',
         'months',
-        'campay_reference',
+        'payment_reference',
         'status',
         'signatureType',
-        'campay_metadata',
+        'payment_metadata',
     ];
 
     protected function casts(): array
@@ -42,7 +51,7 @@ class PaymentTransaction extends Model
             'fees'           => 'integer',
             'amountCharged'  => 'integer',
             'months'         => 'array',
-            'campay_metadata' => 'array',
+            'payment_metadata' => 'array',
         ];
     }
 

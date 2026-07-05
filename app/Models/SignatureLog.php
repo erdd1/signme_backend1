@@ -31,7 +31,7 @@ class SignatureLog extends Model
         'phoneNumber',
         'signatureType',
         'status',
-        'campay_reference',
+        'payment_reference',
         'transaction_id',
         'ancienId',
         'ancienNom',
