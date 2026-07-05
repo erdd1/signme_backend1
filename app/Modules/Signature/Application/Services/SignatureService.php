@@ -5,13 +5,16 @@ namespace App\Modules\Signature\Application\Services;
 use App\Models\Signature;
 use App\Models\User;
 use App\Models\AncienDesignation;
+use App\Models\PaymentEvent;
 use App\Models\PaymentTransaction;
 use App\Core\Helpers\FeeCalculator;
 use App\Core\Exceptions\ApiException;
+use App\Core\Services\PaymentQueueHealthService;
 use App\Modules\AncienDesignation\Application\Services\AncienDesignationService;
+use App\Modules\Payment\Application\Services\PaymentEventRecorder;
 use App\Modules\Payment\Application\Services\PaymentPollingDispatcher;
 use App\Modules\Payment\Application\Services\PaymentStatusCache;
-use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
+use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use App\Domain\Entities\AncienDesignationEntity;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -23,16 +26,17 @@ use Illuminate\Support\Facades\Log;
  * Service Signature — Module Signature
  *
  * Gère les 3 flux de signature :
- * 1. Signature à DISTANCE (paroissien + paiement Campay)
+ * 1. Signature à DISTANCE (paroissien + paiement NotchPay)
  * 2. Signature PRÉSENTIEL (ancien de service / pasteur / admin)
  * 3. Consultation (ma carte, historique, rapports)
  */
 class SignatureService
 {
     public function __construct(
-        private readonly CampayGateway $campayGateway,
+        private readonly NotchPayGateway $notchPayGateway,
         private readonly AncienDesignationService $ancienDesignationService,
         private readonly PaymentPollingDispatcher $paymentPollingDispatcher,
+        private readonly PaymentQueueHealthService $paymentQueueHealthService,
     ) {}
 
     // =========================================================================
@@ -40,34 +44,45 @@ class SignatureService
     // =========================================================================
 
     /**
-     * Initie une signature à distance avec paiement Campay.
+     * Initie une signature à distance avec paiement NotchPay (Mobile Money
+     * ou carte bancaire).
      *
      * Étapes :
      * 1. Valider les mois (non futurs, non déjà signés, pas de doublons)
      * 2. Calculer les frais selon la grille EEC
      * 3. Créer les signatures en statut 'pending'
-     * 4. Initier le paiement Campay (PUSH)
-     * 5. Retourner la référence Campay au Flutter
+     * 4. Initier le paiement NotchPay (PUSH Mobile Money, ou lien de paiement
+     *    carte à ouvrir dans une WebView)
+     * 5. Retourner la référence (et le lien carte le cas échéant) au Flutter
      *
      * @param User  $paroissien  Utilisateur connecté (paroissien)
-     * @param array $data        Données validées
-     * @return array              { signatures, transaction, campay_reference, total_amount }
+     * @param array $data        Données validées : { months, amount, paymentMethod (mobile_money|card),
+     *                           paymentOperator? (ORANGE MONEY|MTN MOBILE MONEY, requis si mobile_money),
+     *                           phoneNumber? (requis si mobile_money) }
+     * @return array              { payment_reference, total_amount, authorization_url? }
      * @throws ApiException
      */
     public function initiateDistanceSignature(User $paroissien, array $data): array
     {
-        $months      = $data['months'];      // ['2026-01', '2026-02', ...]
-        $amount      = (int) $data['amount'];
-        $paymentMethod = $data['paymentMethod']; // ORANGE MONEY | MTN MOBILE MONEY
-        $phoneNumber = $data['phoneNumber'];
+        // ─── 0. Vérifier que la file de paiement est joignable AVANT d'appeler
+        // NotchPay : sinon l'utilisateur reçoit le PUSH de paiement mais le
+        // serveur ne peut plus suivre sa confirmation (échec silencieux).
+        $this->paymentQueueHealthService->ensureAvailable();
+
+        $months        = $data['months'];      // ['2026-01', '2026-02', ...]
+        $amount        = (int) $data['amount'];
+        $paymentMethod = $data['paymentMethod']; // mobile_money | card
+        $paymentOperator = $data['paymentOperator'] ?? null; // ORANGE MONEY | MTN MOBILE MONEY (mobile_money uniquement)
+        $phoneNumber   = $data['phoneNumber'] ?? null;
 
         Log::info("Initiation de signature à distance", [
-            'userId'        => $paroissien->id,
-            'userName'      => $paroissien->nom,
-            'monthsCount'   => count($months),
-            'months'        => $months,
-            'amount'        => $amount,
-            'paymentMethod' => $paymentMethod,
+            'userId'          => $paroissien->id,
+            'userName'        => $paroissien->nom,
+            'monthsCount'     => count($months),
+            'months'          => $months,
+            'amount'          => $amount,
+            'paymentMethod'   => $paymentMethod,
+            'paymentOperator' => $paymentOperator,
         ]);
 
         // ─── 1. Validation des mois ────────────────────────────────────────
@@ -94,14 +109,15 @@ class SignatureService
             'totalCharged'   => $feeData['total'],
         ]);
 
-        return DB::transaction(function () use ($paroissien, $months, $amount, $feeData, $paymentMethod, $phoneNumber) {
+        return DB::transaction(function () use ($paroissien, $months, $amount, $feeData, $paymentMethod, $paymentOperator, $phoneNumber) {
 
             // ─── 3. Créer un PaymentTransaction d'abord ───────────────────
             $transaction = PaymentTransaction::create([
                 'userId'          => $paroissien->id,
                 'churchId'        => $paroissien->churchId,
-                'paymentOperator' => $paymentMethod,
+                'paymentOperator' => $paymentOperator,
                 'paymentNumber'   => $phoneNumber,
+                'paymentMethod'   => $paymentMethod,
                 'amountPerMonth'  => $amount,
                 'monthsCount'     => count($months),
                 'totalAmount'     => $amount * count($months),
@@ -120,7 +136,7 @@ class SignatureService
                 'amountPerMonth'  => $amount,
                 'totalAmount'     => $amount * count($months),
                 'fees'            => $feeData['fees'] * count($months),
-                'paymentMethod'   => $paymentMethod,
+                'paymentMethod'   => $paymentOperator,
                 'phoneNumber'     => $phoneNumber,
                 'signatureType'   => 'distance',
                 'status'          => 'pending',
@@ -133,51 +149,81 @@ class SignatureService
                 'months'         => $months,
             ]);
 
+            PaymentEventRecorder::recordEvent(
+                $transaction->id,
+                null,
+                PaymentEvent::TYPE_CREATED,
+                'pending',
+                ['months' => $months, 'amountCharged' => $feeData['total']],
+            );
+
             // ─── 4. NE PAS créer les signatures en 'pending' ────────────────
-            // Les signatures seront créées seulement quand le webhook Campay
+            // Les signatures seront créées seulement quand le webhook NotchPay
             // confirme le paiement (status = 'completed')
 
-            // ─── 5. Initier le paiement Campay ────────────────────────────
+            // ─── 5. Initier le paiement NotchPay ────────────────────────────
             $description = "Sainte Cène EEC - " . count($months) . " mois - {$paroissien->nom}";
+            $authorizationUrl = null;
 
-            Log::info("Initiation du paiement Campay", [
-                'transaction_id'   => $transaction->id,
-                'campay_reference' => $transaction->campayReference,
-                'amount'           => $feeData['total'],
-                'description'      => $description,
+            Log::info("Initiation du paiement NotchPay", [
+                'transaction_id' => $transaction->id,
+                'paymentMethod'  => $paymentMethod,
+                'amount'         => $feeData['total'],
+                'description'    => $description,
             ]);
 
             try {
-                // Initier le paiement via CampayGateway
-                $this->campayGateway->initiatePayment(
+                if ($paymentMethod === PaymentTransaction::METHOD_CARD) {
+                    $result = $this->notchPayGateway->initiateCardPayment(
+                        $transaction->id,
+                        $feeData['total'],
+                        $description,
+                        $paroissien->email,
+                        (string) config('services.notchpay.callback_url'),
+                    );
+                    $paymentRef = $result['reference'];
+                    $authorizationUrl = $result['authorizationUrl'];
+                } else {
+                    $paymentRef = $this->notchPayGateway->initiateMobileMoney(
+                        $transaction->id,
+                        $phoneNumber,
+                        $paymentOperator,
+                        $feeData['total'],
+                        $description,
+                        $paroissien->email,
+                    );
+                }
+
+                $transaction->update(['payment_reference' => $paymentRef]);
+
+                // Mettre à jour le log avec la référence NotchPay
+                \App\Models\SignatureLog::where('transaction_id', $transaction->id)
+                    ->update(['payment_reference' => $paymentRef]);
+
+                PaymentEventRecorder::recordEvent(
                     $transaction->id,
-                    $phoneNumber,
-                    $feeData['total'],
-                    $description
+                    null,
+                    PaymentEvent::TYPE_SENT_TO_GATEWAY,
+                    'pending',
+                    ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod, 'authorization_url' => $authorizationUrl],
                 );
 
-                // Récupérer la référence Campay
-                $campayRef = $this->campayGateway->getCampayReference();
-                $transaction->update(['campay_reference' => $campayRef]);
-                
-                // Mettre à jour le log avec la référence Campay
-                \App\Models\SignatureLog::where('transaction_id', $transaction->id)
-                    ->update(['campay_reference' => $campayRef]);
-
-                Log::info("✅ Paiement Campay lancé avec succès", [
-                    'transaction_id'   => $transaction->id,
-                    'campay_reference' => $campayRef,
-                    'status'           => 'pending',
-                    'message'          => 'Utilisateur doit confirmer sur son téléphone dans les 60s',
+                Log::info("✅ Paiement NotchPay lancé avec succès", [
+                    'transaction_id'    => $transaction->id,
+                    'payment_reference' => $paymentRef,
+                    'status'            => 'pending',
+                    'message'           => $paymentMethod === PaymentTransaction::METHOD_CARD
+                        ? 'Lien de paiement carte généré.'
+                        : 'Utilisateur doit confirmer sur son téléphone dans les 60s',
                 ]);
 
                 PaymentStatusCache::putFromTransaction($transaction->fresh());
-                $this->paymentPollingDispatcher->schedule($transaction->id, $campayRef);
+                $this->paymentPollingDispatcher->schedule($transaction->id, $paymentRef);
 
             } catch (ApiException $e) {
                 // En cas d'échec d'initiation, marquer tout en 'failed'
                 $transaction->update(['status' => 'failed']);
-                
+
                 // Enregistrer le log (failed)
                 \App\Models\SignatureLog::where('transaction_id', $transaction->id)
                     ->update([
@@ -185,25 +231,36 @@ class SignatureService
                         'errorMessage' => $e->getMessage(),
                     ]);
 
-                Log::error("❌ Erreur lors de l'initiation du paiement Campay", [
+                PaymentEventRecorder::recordEvent(
+                    $transaction->id,
+                    null,
+                    PaymentEvent::TYPE_FAILED,
+                    'failed',
+                    ['error' => $e->getMessage(), 'stage' => 'initiation'],
+                );
+
+                Log::error("❌ Erreur lors de l'initiation du paiement NotchPay", [
                     'transaction_id' => $transaction->id,
                     'error'          => $e->getMessage(),
                     'code'           => $e->getCode(),
                 ]);
-                
+
                 throw $e;
             }
 
             return [
-                'campay_reference' => $campayRef,
-                'total_amount'     => $feeData['total'],
-                'amount_per_month' => $amount,
-                'fees_per_month'   => $feeData['fees'],
-                'months_count'     => count($months),
-                'months'           => $months,
-                'status'           => 'pending',
-                'message'          => 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
-                'transaction_id'   => $transaction->id,
+                'payment_reference' => $paymentRef,
+                'authorization_url' => $authorizationUrl,
+                'total_amount'      => $feeData['total'],
+                'amount_per_month'  => $amount,
+                'fees_per_month'    => $feeData['fees'],
+                'months_count'      => count($months),
+                'months'            => $months,
+                'status'            => 'pending',
+                'message'           => $paymentMethod === PaymentTransaction::METHOD_CARD
+                    ? 'Complétez votre paiement par carte.'
+                    : 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
+                'transaction_id'    => $transaction->id,
             ];
         });
     }
@@ -441,59 +498,39 @@ class SignatureService
     }
 
     // =========================================================================
-    // FLUX 3 : Webhook Campay — Confirmation du paiement
+    // FLUX 3 : Webhook NotchPay — Confirmation du paiement
     // =========================================================================
 
     /**
-     * Traite le webhook Campay après confirmation du paiement.
-     *
-     * Appelé par Campay (pas par Flutter).
-     * Met à jour le statut des signatures et de la transaction.
-     * Transaction atomique pour garantir la cohérence.
-     *
-     * @param array $payload Corps JSON décodé du webhook Campay (contient le champ "signature")
-     * @throws ApiException
+     * Applique une notification NotchPay (webhook ou job Redis).
+     * La validation HMAC est faite en amont par PaymentController::webhook().
      */
-    public function handleWebhook(array $payload): void
+    public function processPaymentNotification(array $payload): void
     {
-        if (!$this->campayGateway->validateWebhookSignature($payload)) {
-            Log::warning('Campay Webhook (SignatureService): Signature invalide');
-            throw ApiException::forbidden('Signature webhook invalide.');
-        }
+        $paymentRef = $payload['reference'] ?? null;
+        $rawStatus  = $payload['status']    ?? 'failed';
 
-        $this->processCampayNotification($payload);
-    }
-
-    /**
-     * Applique une notification Campay (webhook ou job Redis).
-     * Ne valide pas le HMAC — réservé aux appels internes de confiance.
-     */
-    public function processCampayNotification(array $payload): void
-    {
-        $campayRef    = $payload['reference'] ?? null;
-        $campayStatus = $payload['status']    ?? 'FAILED';
-
-        if (!$campayRef) {
-            Log::warning('Campay notification: Référence manquante', $payload);
+        if (!$paymentRef) {
+            Log::warning('NotchPay notification: Référence manquante', $payload);
             return;
         }
 
-        $internalStatus = $this->campayGateway->mapStatus($campayStatus);
+        $internalStatus = $this->notchPayGateway->mapStatus($rawStatus);
 
-        Log::info('Campay notification reçue', [
-            'reference'       => $campayRef,
-            'campay_status'   => $campayStatus,
+        Log::info('NotchPay notification reçue', [
+            'reference'       => $paymentRef,
+            'raw_status'      => $rawStatus,
             'internal_status' => $internalStatus,
         ]);
 
-        DB::transaction(function () use ($campayRef, $internalStatus, $payload) {
+        DB::transaction(function () use ($paymentRef, $internalStatus, $payload) {
 
             // ─── Récupérer la PaymentTransaction ────────────────────────────
-            $transaction = PaymentTransaction::where('campay_reference', $campayRef)->first();
+            $transaction = PaymentTransaction::where('payment_reference', $paymentRef)->first();
 
             if (!$transaction) {
                 Log::warning("Webhook: PaymentTransaction non trouvée", [
-                    'reference' => $campayRef,
+                    'reference' => $paymentRef,
                     'payload'   => $payload,
                 ]);
                 return;
@@ -512,13 +549,13 @@ class SignatureService
                 
                 if (empty($months)) {
                     Log::error("Webhook: Aucun mois trouvé pour créer les signatures", [
-                        'reference'    => $campayRef,
+                        'reference'    => $paymentRef,
                         'months_raw'   => $transaction->months,
                         'transaction_id' => $transaction->id,
                     ]);
                 } else {
                     Log::info("Création de signatures pour les mois", [
-                        'reference'    => $campayRef,
+                        'reference'    => $paymentRef,
                         'months_count' => count($months),
                         'months'       => $months,
                     ]);
@@ -553,21 +590,21 @@ class SignatureService
                                     'phoneNumber'    => $transaction->paymentNumber,
                                     'signatureType'  => 'distance',
                                     'status'         => 'completed',
-                                    'campay_reference' => $campayRef,
+                                    'payment_reference' => $paymentRef,
                                 ]);
 
                                 Log::info("✅ Signature créée avec succès", [
                                     'user_id'  => $transaction->userId,
                                     'month'    => $monthKey,
                                     'status'   => 'completed',
-                                    'reference' => $campayRef,
+                                    'reference' => $paymentRef,
                                 ]);
                             } else {
                                 // METTRE À JOUR la signature existante si status n'est pas 'completed'
                                 if ($signature->status !== 'completed') {
                                     $signature->update([
                                         'status'             => 'completed',
-                                        'campay_reference'   => $campayRef,
+                                        'payment_reference'   => $paymentRef,
                                         'amount'             => $transaction->amountPerMonth,
                                         'fees'               => $transaction->fees > 0 ? (int)($transaction->fees / $transaction->monthsCount) : 0,
                                         'paymentMethod'      => $transaction->paymentOperator,
@@ -578,13 +615,13 @@ class SignatureService
                                         'user_id'        => $transaction->userId,
                                         'month'          => $monthKey,
                                         'previous_status' => $signature->status,
-                                        'reference'      => $campayRef,
+                                        'reference'      => $paymentRef,
                                     ]);
                                 } else {
                                     Log::warning("Signature existe déjà avec status='completed' (idempotence)", [
                                         'user_id'  => $transaction->userId,
                                         'month'    => $monthKey,
-                                        'reference' => $campayRef,
+                                        'reference' => $paymentRef,
                                     ]);
                                 }
                             }
@@ -602,13 +639,13 @@ class SignatureService
                             'phoneNumber'     => $transaction->paymentNumber,
                             'signatureType'   => 'distance',
                             'status'          => 'completed',
-                            'campay_reference' => $campayRef,
+                            'payment_reference' => $paymentRef,
                             'transaction_id'  => $transaction->id,
                         ]);
                         
                     } catch (\Exception $e) {
                         Log::error("Erreur lors de la création des signatures", [
-                            'reference'    => $campayRef,
+                            'reference'    => $paymentRef,
                             'error'        => $e->getMessage(),
                             'trace'        => $e->getTraceAsString(),
                         ]);
@@ -625,7 +662,7 @@ class SignatureService
                             'phoneNumber'     => $transaction->paymentNumber,
                             'signatureType'   => 'distance',
                             'status'          => 'failed',
-                            'campay_reference' => $campayRef,
+                            'payment_reference' => $paymentRef,
                             'transaction_id'  => $transaction->id,
                             'errorMessage'    => $e->getMessage(),
                         ]);
@@ -635,7 +672,7 @@ class SignatureService
                 }
             } else {
                 Log::info("Webhook: Statut non 'completed', pas de création de signatures", [
-                    'reference'    => $campayRef,
+                    'reference'    => $paymentRef,
                     'status'       => $internalStatus,
                 ]);
                 
@@ -654,35 +691,41 @@ class SignatureService
                         'phoneNumber'     => $transaction->paymentNumber,
                         'signatureType'   => 'distance',
                         'status'          => 'failed',
-                        'campay_reference' => $campayRef,
+                        'payment_reference' => $paymentRef,
                         'transaction_id'  => $transaction->id,
                         'errorMessage'    => $payload['message'] ?? 'Paiement échoué',
                     ]);
                 }
             }
 
-            // ✅ Met à jour la PaymentTransaction
-            $txnUpdated = PaymentTransaction::where('campay_reference', $campayRef)
+            // ✅ Met à jour la PaymentTransaction — la clause `where('status', 'pending')`
+            // garantit qu'un statut déjà terminal (completed/failed) ne peut
+            // JAMAIS être écrasé par un événement tardif (webhook + revérification
+            // manuelle arrivant en concurrence). `confirmed_at` n'est donc posé
+            // qu'une seule fois, à la toute première transition vers 'completed'.
+            $txnUpdated = PaymentTransaction::where('payment_reference', $paymentRef)
+                                            ->where('status', 'pending')
                                             ->update([
                                                 'status'          => $internalStatus,
-                                                'campay_metadata' => json_encode($payload),
+                                                'payment_metadata' => json_encode($payload),
+                                                'confirmed_at'    => $internalStatus === 'completed' ? now() : null,
                                                 'updated_at'      => now(),
                                             ]);
 
             Log::info("PaymentTransaction mise à jour", [
-                'reference'    => $campayRef,
+                'reference'    => $paymentRef,
                 'new_status'   => $internalStatus,
                 'rows_updated' => $txnUpdated,
             ]);
         });
 
-        $transaction = PaymentTransaction::where('campay_reference', $campayRef)->first();
+        $transaction = PaymentTransaction::where('payment_reference', $paymentRef)->first();
         if ($transaction) {
             PaymentStatusCache::putFromTransaction($transaction->fresh());
         }
 
-        Log::info('✅ Notification Campay traitée', [
-            'reference' => $campayRef,
+        Log::info('✅ Notification NotchPay traitée', [
+            'reference' => $paymentRef,
             'status' => $internalStatus,
         ]);
     }

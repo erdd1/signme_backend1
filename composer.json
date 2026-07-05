@@ -6,11 +6,15 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "barryvdh/laravel-dompdf": "^3.1",
         "cloudinary-labs/cloudinary-laravel": "^3.0",
+        "doctrine/dbal": "*",
+        "kreait/firebase-php": "^7.24",
         "laravel/framework": "^11.0",
         "laravel/reverb": "^1.10",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^2.9",
+        "notchpay/notchpay-php": "*",
         "predis/predis": "^3.5"
     },
     "require-dev": {

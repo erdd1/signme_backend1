@@ -527,6 +527,18 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
 
     Route::get('/contributions-evenements', [ContributionController::class, 'allForTreasury']);
 
+    // ─── Actions avancées contribution (détail complet, revérification, logs) ──
+    // Scopé par uuid (jamais par id numérique, cohérent avec tout le module
+    // Evenement — pas de collision avec le préfixe client
+    // contributions/transaction/{uuid}/status, préfixe complet différent).
+    Route::prefix('contributions')->group(function () {
+        Route::get('/{uuid}/detail',    [ContributionController::class, 'detail']);
+        Route::get('/{uuid}/events',    [ContributionController::class, 'events']);
+        Route::get('/{uuid}/sync-logs', [ContributionController::class, 'syncLogs']);
+        Route::post('/{uuid}/recheck',  [ContributionController::class, 'recheck']);
+        Route::get('/{uuid}/receipt',   [ContributionController::class, 'receipt']);
+    });
+
     // =========================================================================
     // ADMIN PAYMENT/SIGNATURE PAYMENT MANAGEMENT (Full CRUD)
     // =========================================================================
@@ -537,6 +549,13 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::put('/{id}',       [PaymentController::class, 'update']);
         Route::delete('/{id}',    [PaymentController::class, 'destroy']);
         Route::post('/{paymentId}/refund', [PaymentController::class, 'refund']);
+
+        // ─── Actions avancées (détail complet, revérification, logs, reçu) ──
+        Route::get('/{id}/detail',      [PaymentController::class, 'detail']);
+        Route::get('/{id}/events',      [PaymentController::class, 'events']);
+        Route::get('/{id}/sync-logs',   [PaymentController::class, 'syncLogs']);
+        Route::post('/{id}/recheck',    [PaymentController::class, 'recheck']);
+        Route::get('/{id}/receipt',     [PaymentController::class, 'receipt']);
     });
 
     // =========================================================================

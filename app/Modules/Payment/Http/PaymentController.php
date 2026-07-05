@@ -3,74 +3,124 @@
 namespace App\Modules\Payment\Http;
 
 use App\Http\Controllers\Controller;
+use App\Core\Exceptions\ApiException;
+use App\Core\Traits\ApiResponseTrait;
 use App\Modules\Payment\Http\Requests\WebhookRequest;
+use App\Modules\Payment\Http\Resources\PaymentEventResource;
 use App\Modules\Payment\Http\Resources\PaymentResource;
+use App\Modules\Payment\Http\Resources\PaymentSyncLogResource;
+use App\Modules\Payment\Http\Resources\PaymentTransactionDetailResource;
 use App\Modules\Payment\Application\PaymentService;
 use App\Modules\Payment\Application\DTOs\ProcessPaymentDTO;
-use App\Modules\Payment\Infrastructure\ExternalServices\CampayGateway;
-use App\Modules\Payment\Application\Jobs\ProcessCampayWebhookJob;
+use App\Modules\Payment\Application\Services\PaymentEventRecorder;
+use App\Modules\Payment\Application\Services\PaymentReceiptService;
+use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
+use App\Modules\Payment\Application\Jobs\ProcessPaymentWebhookJob;
 use App\Modules\Signature\Application\Services\SignatureService;
+use App\Modules\Evenement\Application\Jobs\ProcessEvenementContributionWebhookJob;
+use App\Models\PaymentEvent;
+use App\Models\PaymentSyncLog;
+use App\Models\PaymentTransaction;
 use App\Models\Signature;
+use App\Models\Contribution;
 use Illuminate\Http\Request;
 use Exception;
 
 /**
  * Class PaymentController
- * 
+ *
  * Contrôleur pour les endpoints de paiement
- * Webhook HMAC-sécurisé pour Campay
+ * Webhook HMAC-sécurisé pour NotchPay
  */
 class PaymentController extends Controller
 {
+    use ApiResponseTrait;
+
     public function __construct(
         private PaymentService $paymentService,
         private SignatureService $signatureService,
-        private CampayGateway $campayGateway,
+        private NotchPayGateway $notchPayGateway,
+        private PaymentReceiptService $paymentReceiptService,
     ) {}
 
-   
+
     /**
-     * POST /api/v1/webhooks/campay
+     * POST /api/v1/webhooks/notchpay
      *
-     * Webhook CENTRAL pour les notifications Campay (sécurisé par HMAC-SHA256).
+     * Webhook CENTRAL pour les notifications NotchPay (sécurisé par HMAC-SHA256
+     * sur le corps brut, header `x-notch-signature`).
      *
      * Flux :
-     *   Campay → POST /api/v1/webhooks/campay
-     *          → valider HMAC
-     *          → trouver la référence
-     *          → mettre à jour Signature(s) + PaymentTransaction en une transaction
+     *   NotchPay → POST /api/v1/webhooks/notchpay
+     *            → valider HMAC (corps brut)
+     *            → extraire la référence (payload imbriqué sous "data")
+     *            → trouver la référence
+     *            → mettre à jour Signature(s)/Contribution + PaymentTransaction
      */
     public function webhook(Request $request)
     {
         try {
-            $payload = $request->all();
+            $rawBody = $request->getContent();
+            $signatureHeader = $request->header('x-notch-signature');
+            $decoded = json_decode($rawBody, true) ?? [];
+            $data = $decoded['data'] ?? $decoded;
 
-            \Log::info('Campay Webhook received', [
-                'reference' => $payload['reference'] ?? null,
-                'status'    => $payload['status'] ?? null,
+            \Log::info('NotchPay Webhook received', [
+                'event'     => $decoded['event'] ?? null,
+                'reference' => $data['reference'] ?? null,
+                'status'    => $data['status'] ?? null,
             ]);
 
-            // ─── 1. Valider la signature JWT (champ "signature" du body) ────────
-            if (!$this->campayGateway->validateWebhookSignature($payload)) {
-                \Log::warning('Campay Webhook: Signature invalide', [
-                    'reference' => $payload['reference'] ?? null,
+            // ─── 1. Valider la signature HMAC-SHA256 (corps brut) ────────────────
+            if (!$this->notchPayGateway->validateWebhookSignature($rawBody, $signatureHeader)) {
+                \Log::warning('NotchPay Webhook: Signature invalide', [
+                    'reference' => $data['reference'] ?? null,
                 ]);
                 return response()->json(['success' => false, 'message' => 'Invalid signature'], 403);
             }
 
             // ─── 2. Vérifier la référence ─────────────────────────────────────────────
-            $campayRef = $payload['reference'] ?? null;
-            if (!$campayRef) {
-                \Log::warning('Campay Webhook: Référence manquante', $payload);
+            $paymentRef = $data['reference'] ?? null;
+            if (!$paymentRef) {
+                \Log::warning('NotchPay Webhook: Référence manquante', $decoded);
                 return response()->json(['success' => false, 'message' => 'Missing reference'], 400);
             }
 
             // ─── 3. Traitement asynchrone (file Redis payments) ─────────────────
-            ProcessCampayWebhookJob::dispatch($payload);
+            // Une référence NotchPay appartient soit à une transaction "signature"
+            // (payment_transactions), soit à une contribution événement
+            // (contributions) : on route vers le bon job sans dupliquer la
+            // vérification de signature ni le gateway NotchPay. Le même lookup
+            // sert aussi à enregistrer l'événement d'audit "webhook_received".
+            $resultingStatus = $this->notchPayGateway->mapStatus($data['status'] ?? '');
+            $contribution = Contribution::where('payment_reference', $paymentRef)->first();
 
-            \Log::info('Campay Webhook accepté — traitement en file', [
-                'reference' => $campayRef,
-                'status'    => $payload['status'] ?? null,
+            if ($contribution) {
+                PaymentEventRecorder::recordEvent(
+                    null,
+                    $contribution->id,
+                    PaymentEvent::TYPE_WEBHOOK,
+                    $resultingStatus,
+                    $data,
+                );
+                ProcessEvenementContributionWebhookJob::dispatch($data);
+            } else {
+                $transaction = PaymentTransaction::where('payment_reference', $paymentRef)->first();
+                if ($transaction) {
+                    PaymentEventRecorder::recordEvent(
+                        $transaction->id,
+                        null,
+                        PaymentEvent::TYPE_WEBHOOK,
+                        $resultingStatus,
+                        $data,
+                    );
+                }
+                ProcessPaymentWebhookJob::dispatch($data);
+            }
+
+            \Log::info('NotchPay Webhook accepté — traitement en file', [
+                'reference' => $paymentRef,
+                'status'    => $data['status'] ?? null,
             ]);
 
             return response()->json(['status' => 'accepted'], 200);
@@ -81,7 +131,7 @@ class PaymentController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // ✅ Toujours retourner 200 à Campay pour éviter les retrys infinis
+            // ✅ Toujours retourner 200 à NotchPay pour éviter les retrys infinis
             return response()->json(['status' => 'ok'], 200);
         }
     }
@@ -175,7 +225,7 @@ class PaymentController extends Controller
     /**
      * POST /api/admin/payments
      *
-     * Les paiements sont créés automatiquement via le flux Campay.
+     * Les paiements sont créés automatiquement via le flux NotchPay.
      * La création manuelle n'est pas supportée par design.
      */
     public function store(Request $request)
@@ -183,7 +233,7 @@ class PaymentController extends Controller
         return response()->json([
             'success' => false,
             'message' => 'La création manuelle de paiement n\'est pas supportée. '
-                       . 'Utilisez le flux Campay via POST /api/v1/signatures/distance.',
+                       . 'Utilisez le flux NotchPay via POST /api/v1/signatures/distance.',
         ], 501);
     }
 
@@ -257,5 +307,130 @@ class PaymentController extends Controller
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    // =========================================================================
+    // ADMIN — Actions avancées (détail, revérification, logs, reçu)
+    // =========================================================================
+
+    /**
+     * GET /api/admin/payments/{id}/detail
+     */
+    public function detail(int $paymentId)
+    {
+        $transaction = PaymentTransaction::findOrFail($paymentId);
+
+        return $this->successResponse(
+            PaymentTransactionDetailResource::make($transaction),
+            'Détail du paiement récupéré avec succès.'
+        );
+    }
+
+    /**
+     * GET /api/admin/payments/{id}/events
+     * Historique métier permanent (payment_events) pour CETTE transaction.
+     */
+    public function events(int $paymentId)
+    {
+        PaymentTransaction::findOrFail($paymentId);
+
+        $events = PaymentEvent::with('triggeredByAdmin:id,nom')
+            ->where('payment_transaction_id', $paymentId)
+            ->orderByDesc('created_at')
+            ->paginate(20)
+            ->through(fn (PaymentEvent $event) => (new PaymentEventResource($event))->resolve());
+
+        return $this->paginatedResponse($events, 'Historique des événements récupéré avec succès.');
+    }
+
+    /**
+     * GET /api/admin/payments/{id}/sync-logs
+     * Diagnostic technique (payment_sync_logs, purgé après 7 jours).
+     */
+    public function syncLogs(int $paymentId)
+    {
+        PaymentTransaction::findOrFail($paymentId);
+
+        $logs = PaymentSyncLog::where('payment_transaction_id', $paymentId)
+            ->orderByDesc('created_at')
+            ->paginate(20)
+            ->through(fn (PaymentSyncLog $log) => (new PaymentSyncLogResource($log))->resolve());
+
+        return $this->paginatedResponse($logs, 'Logs de synchronisation récupérés avec succès.');
+    }
+
+    /**
+     * POST /api/admin/payments/{id}/recheck
+     *
+     * Revérifie le statut auprès de NotchPay de façon SYNCHRONE. Actif
+     * uniquement si le paiement est encore `pending` — un paiement déjà
+     * `completed`/`failed` est définitif (immutabilité financière).
+     */
+    public function recheck(Request $request, int $paymentId)
+    {
+        $transaction = PaymentTransaction::findOrFail($paymentId);
+
+        if ($transaction->status !== 'pending') {
+            throw ApiException::badRequest(
+                "Ce paiement est déjà '{$transaction->status}' — aucune revérification possible sur un statut définitif."
+            );
+        }
+
+        $paymentData = $this->notchPayGateway->verifyPayment($transaction->payment_reference);
+
+        if ($paymentData === null) {
+            PaymentEventRecorder::recordEvent(
+                $transaction->id,
+                null,
+                PaymentEvent::TYPE_MANUAL_RECHECK,
+                'pending',
+                ['message' => 'NotchPay indisponible', 'synthetic' => true],
+                $request->user()->id,
+                $request->ip(),
+            );
+
+            return $this->errorResponse('NotchPay est indisponible pour le moment. Réessayez plus tard.', 503);
+        }
+
+        $rawStatus = $paymentData['status'] ?? '';
+        $internalStatus = $this->notchPayGateway->mapStatus($rawStatus);
+
+        PaymentEventRecorder::recordSyncLog($transaction->id, null, $internalStatus, $paymentData);
+        PaymentEventRecorder::recordEvent(
+            $transaction->id,
+            null,
+            PaymentEvent::TYPE_MANUAL_RECHECK,
+            $internalStatus,
+            $paymentData,
+            $request->user()->id,
+            $request->ip(),
+        );
+
+        if (in_array($internalStatus, ['completed', 'failed'], true)) {
+            $this->signatureService->processPaymentNotification(array_merge($paymentData, [
+                'reference' => $transaction->payment_reference,
+                'status'    => $rawStatus,
+            ]));
+        }
+
+        return $this->successResponse(
+            PaymentTransactionDetailResource::make($transaction->fresh()),
+            'Statut revérifié avec succès.'
+        );
+    }
+
+    /**
+     * GET /api/admin/payments/{id}/receipt?download=1
+     *
+     * Génère le reçu PDF — même document pour "Voir le reçu" (inline) et
+     * "Exporter en PDF" (téléchargement), seul le Content-Disposition diffère.
+     */
+    public function receipt(Request $request, int $paymentId)
+    {
+        $transaction = PaymentTransaction::findOrFail($paymentId);
+        $pdf = $this->paymentReceiptService->generateForPaymentTransaction($transaction);
+        $filename = 'recu-' . ($transaction->payment_reference ?? $transaction->id) . '.pdf';
+
+        return $request->boolean('download') ? $pdf->download($filename) : $pdf->stream($filename);
     }
 }
