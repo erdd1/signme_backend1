@@ -79,9 +79,15 @@ class PublicationService
 
     private function bumpPublicationCache(int $churchId): void
     {
-        $key = "pub:version:{$churchId}";
-        Cache::add($key, 1, now()->addDays(7));
-        Cache::increment($key);
+        // La vue admin non filtrée agrège toutes les églises (churchKey 'all') —
+        // sans ça, une création/modif/suppression ne rafraîchit que le cache de
+        // l'église concernée et la liste admin globale reste périmée jusqu'à
+        // expiration naturelle du cache (3 min).
+        foreach ([(string) $churchId, 'all'] as $churchKey) {
+            $key = "pub:version:{$churchKey}";
+            Cache::add($key, 1, now()->addDays(7));
+            Cache::increment($key);
+        }
     }
 
     /**
