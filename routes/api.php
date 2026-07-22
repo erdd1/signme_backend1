@@ -166,10 +166,15 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/stats', [UserController::class, 'stats'])
              ->middleware('role:pasteur,secretaire');
 
-        Route::get('/{id}',            [UserController::class, 'show']);
+        Route::get('/{id}',            [UserController::class, 'show'])
+             ->middleware('role:pasteur,secretaire');
 
-        // Update own profile / user profile (pasteur can modify role, secrétaire cannot)
-        Route::put('/{id}',            [UserController::class, 'update']);
+        // Modifier un membre (pasteur peut modifier le rôle, secrétaire non —
+        // voir UserService::update()). Restreint à la gestion des membres :
+        // jamais d'auto-édition par un rôle "client" (paroissien/ancien/trésorier),
+        // qui n'a aucun accès à cette route côté app mobile.
+        Route::put('/{id}',            [UserController::class, 'update'])
+             ->middleware('role:pasteur,secretaire');
 
         // Upload own photo / user photo
         Route::post('/{id}/photo',     [UserController::class, 'uploadPhoto']);
@@ -375,37 +380,44 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::get('/me',               [AuthController::class, 'me']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
 
-        // ─── PHASE 3 : Admin Security Controls ─────────────────────────────
-        Route::get('/security-logs',     [AuthController::class, 'getAllSecurityLogs']);
-        Route::get('/security-alerts',   [AuthController::class, 'getSystemSecurityAlerts']);
-        Route::post('/enforce-mfa/{userId}', [AuthController::class, 'enforceMFAForUser']);
-
-        // ─── Admin Audit Trails ────────────────────────────────────────────
-        Route::get('/audit/trail',           [AuthController::class, 'getAuditTrail']);
-        Route::get('/audit/all-logins',      [AuthController::class, 'getAllLogins']);
-        Route::get('/audit/all-attempts',    [AuthController::class, 'getAllFailedAttempts']);
-        Route::get('/audit/trail/export',    [AuthController::class, 'exportAuditTrail']);
-
-        // ─── PHASE 2 : MFA ─────────────────────────────────────────────────
+        // ─── PHASE 2 : MFA — doit rester accessible AVANT confirmation MFA,
+        // sinon un admin qui n'a pas encore activé/confirmé son MFA ne
+        // pourrait jamais atteindre le flux qui le lui permet précisément.
         Route::post('/mfa/enable',      [AuthController::class, 'enableMFA']);
         Route::post('/mfa/confirm',     [AuthController::class, 'confirmMFA']);
         Route::post('/mfa/disable',     [AuthController::class, 'disableMFA']);
         Route::get('/mfa/status',       [AuthController::class, 'getMFAStatus']);
 
-        // ─── PHASE 2 : Email Verification ──────────────────────────────────
+        // ─── PHASE 2 : Email Verification — même raison (bootstrap) ────────
         Route::post('/email/request-verification', [AuthController::class, 'requestEmailVerification']);
         Route::post('/email/verify',    [AuthController::class, 'verifyEmail']);
-
-        // ─── PHASE 2 : Device Management ───────────────────────────────────
-        Route::get('/devices',          [DeviceController::class, 'index']);
-        Route::delete('/devices/{id}',  [DeviceController::class, 'disconnect']);
     });
 
     // =========================================================================
-    // MFA OBLIGATOIRE : tout le reste de l'API admin (hors /admin/auth/*)
-    // est bloqué tant que l'administrateur n'a pas confirmé son MFA.
+    // MFA OBLIGATOIRE : tout le reste de l'API admin (hors bootstrap MFA/email
+    // ci-dessus) est bloqué tant que l'administrateur n'a pas confirmé son MFA
+    // — y compris les endpoints d'audit/sécurité et la gestion des appareils,
+    // volontairement déplacés ici (ils ne doivent jamais être lisibles par une
+    // session admin qui n'a pas encore confirmé son second facteur).
     // =========================================================================
     Route::middleware('mfa.enabled')->group(function () {
+
+        Route::prefix('auth')->group(function () {
+            // ─── PHASE 3 : Admin Security Controls ─────────────────────────
+            Route::get('/security-logs',     [AuthController::class, 'getAllSecurityLogs']);
+            Route::get('/security-alerts',   [AuthController::class, 'getSystemSecurityAlerts']);
+            Route::post('/enforce-mfa/{userId}', [AuthController::class, 'enforceMFAForUser']);
+
+            // ─── Admin Audit Trails ──────────────────────────────────────────
+            Route::get('/audit/trail',           [AuthController::class, 'getAuditTrail']);
+            Route::get('/audit/all-logins',      [AuthController::class, 'getAllLogins']);
+            Route::get('/audit/all-attempts',    [AuthController::class, 'getAllFailedAttempts']);
+            Route::get('/audit/trail/export',    [AuthController::class, 'exportAuditTrail']);
+
+            // ─── PHASE 2 : Device Management ─────────────────────────────────
+            Route::get('/devices',          [DeviceController::class, 'index']);
+            Route::delete('/devices/{id}',  [DeviceController::class, 'disconnect']);
+        });
 
     // =========================================================================
     // ADMIN USER MANAGEMENT (Full CRUD)

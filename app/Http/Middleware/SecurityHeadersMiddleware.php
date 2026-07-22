@@ -69,7 +69,10 @@ class SecurityHeadersMiddleware
         $response->header('X-Permitted-Cross-Domain-Policies', 'none');
 
         // ─── Server header masking ─────────────────────────────────────────
-        // Déjà géré dans config/app.php: 'hide_app_info' => true
+        // Le header "Server" (nom/version du serveur web) n'est PAS masqué
+        // ici — Laravel/PHP ne l'émettent pas eux-mêmes, c'est le serveur web
+        // qui le génère. À masquer côté infra avant mise en production :
+        // Nginx (`server_tokens off;`) et PHP-FPM (`expose_php = Off`).
 
         return $response;
     }

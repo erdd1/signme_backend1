@@ -323,14 +323,21 @@ class ContributionService
     }
 
     /**
-     * Liste toutes les contributions de l'église (onglet drawer trésorerie).
+     * Liste toutes les contributions de l'église (onglet drawer trésorerie
+     * mobile, et vue trésorerie admin — [$statut] permet à l'app mobile de
+     * ne demander que les contributions "completed" ; laissé vide, l'admin
+     * continue de voir tous les statuts pour l'audit/recheck).
      */
-    public function listAllForTreasury(User $authUser, int $perPage = 20): LengthAwarePaginator
+    public function listAllForTreasury(User $authUser, int $perPage = 20, ?string $statut = null): LengthAwarePaginator
     {
         $query = Contribution::query()->with(['user', 'evenement']);
 
         if (!$authUser->isAdmin()) {
             $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
+        }
+
+        if (!empty($statut)) {
+            $query->where('statut', $statut);
         }
 
         return $query->orderByDesc('created_at')->paginate($perPage);

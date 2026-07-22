@@ -89,7 +89,8 @@ class ContributionController extends Controller
     public function allForTreasury(Request $request): JsonResponse
     {
         $perPage = min((int) $request->get('per_page', 20), 100);
-        $contributions = $this->contributionService->listAllForTreasury($request->user(), $perPage);
+        $statut = $request->get('status');
+        $contributions = $this->contributionService->listAllForTreasury($request->user(), $perPage, $statut);
 
         return $this->paginatedResponse(
             $contributions->setCollection(

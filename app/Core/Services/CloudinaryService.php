@@ -241,7 +241,10 @@ class CloudinaryService
     }
 
     /**
-     * Vérifie si un fichier est une image valide (MIME ou extension, utile sur mobile).
+     * Vérifie si un fichier est une image valide — se base UNIQUEMENT sur le
+     * type MIME détecté côté serveur (contenu réel du fichier), jamais sur
+     * l'extension fournie par le client (attaquant-contrôlée, ne prouve rien
+     * sur le contenu réel).
      *
      * @param UploadedFile $file
      * @return bool
@@ -257,12 +260,7 @@ class CloudinaryService
         ];
 
         $mime = $file->getMimeType();
-        if ($mime !== null && in_array($mime, $allowedMimes, true)) {
-            return true;
-        }
 
-        $extension = strtolower($file->getClientOriginalExtension());
-
-        return in_array($extension, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
+        return $mime !== null && in_array($mime, $allowedMimes, true);
     }
 }

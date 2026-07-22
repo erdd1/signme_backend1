@@ -525,8 +525,15 @@ class SignatureService
 
         DB::transaction(function () use ($paymentRef, $internalStatus, $payload) {
 
-            // ─── Récupérer la PaymentTransaction ────────────────────────────
-            $transaction = PaymentTransaction::where('payment_reference', $paymentRef)->first();
+            // ─── Récupérer la PaymentTransaction (verrouillée pour la durée
+            // de la transaction) ─────────────────────────────────────────────
+            // Empêche une lecture concurrente (ex: webhook + recheck manuel
+            // quasi simultanés) de voir toutes les deux status='pending' et
+            // de tenter la même transition en double — la deuxième attend
+            // que la première ait committé avant de lire l'état à jour.
+            $transaction = PaymentTransaction::where('payment_reference', $paymentRef)
+                ->lockForUpdate()
+                ->first();
 
             if (!$transaction) {
                 Log::warning("Webhook: PaymentTransaction non trouvée", [

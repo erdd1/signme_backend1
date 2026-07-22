@@ -2,7 +2,9 @@
 
 namespace App\Modules\Payment\Infrastructure\ExternalServices;
 
+use App\Core\Exceptions\ApiException;
 use Exception;
+use GuzzleHttp\Exception\GuzzleException;
 use NotchPay\Exceptions\ApiException as NotchPayApiException;
 use NotchPay\NotchPay;
 use NotchPay\Payment;
@@ -89,9 +91,18 @@ class NotchPayGateway
                 throw new Exception('Aucune référence reçue de NotchPay.');
             }
 
+            // Le corps attendu par l'API NotchPay actuelle (PUT /payments/{reference})
+            // imbrique le numéro sous "data" — un champ "account_number" à la
+            // racine (ancien format) est silencieusement mal interprété par
+            // l'API live et provoque des 500 intermittents côté NotchPay.
+            // Cf. vendor/notchpay/notchpay-php/openapi.yaml (processPaymentPut).
             Payment::charge($reference, [
-                'channel'        => $channel,
-                'account_number' => $phone,
+                'channel' => $channel,
+                'data' => [
+                    'phone'          => $phone,
+                    'account_number' => $phone,
+                    'country'        => 'CM',
+                ],
             ]);
 
             \Log::info('NotchPay initiateMobileMoney - Paiement initié avec succès', [
@@ -103,10 +114,37 @@ class NotchPayGateway
         } catch (NotchPayApiException $e) {
             \Log::error('NotchPay API Error (mobile money)', [
                 'error'     => $e->getMessage(),
+                'errors'    => $e->errors,
                 'paymentId' => $paymentId,
             ]);
             throw $e;
+        } catch (GuzzleException $e) {
+            // Le SDK NotchPay ne convertit en NotchPayApiException que les
+            // erreurs 4xx (voir Request::setHttpResponse) — une panne 5xx
+            // côté NotchPay remonte ici sous sa forme Guzzle brute et ne
+            // doit JAMAIS atteindre l'utilisateur telle quelle (message
+            // technique en anglais, trace Guzzle).
+            \Log::error('NotchPay erreur serveur (mobile money)', [
+                'error'     => $e->getMessage(),
+                'body'      => $this->guzzleResponseBody($e),
+                'paymentId' => $paymentId,
+            ]);
+            throw ApiException::serviceUnavailable(
+                'NotchPay est momentanément indisponible. Réessayez dans quelques instants.'
+            );
         }
+    }
+
+    /**
+     * Extrait le corps de réponse brut d'une exception Guzzle, si disponible
+     * (utile pour diagnostiquer une 5xx dont le SDK NotchPay ne conserve pas
+     * le détail).
+     */
+    private function guzzleResponseBody(GuzzleException $e): ?string
+    {
+        if (!method_exists($e, 'getResponse')) return null;
+        $response = $e->getResponse();
+        return $response?->getBody()->getContents();
     }
 
     /**
@@ -158,9 +196,19 @@ class NotchPayGateway
         } catch (NotchPayApiException $e) {
             \Log::error('NotchPay API Error (carte)', [
                 'error'     => $e->getMessage(),
+                'errors'    => $e->errors,
                 'paymentId' => $paymentId,
             ]);
             throw $e;
+        } catch (GuzzleException $e) {
+            \Log::error('NotchPay erreur serveur (carte)', [
+                'error'     => $e->getMessage(),
+                'body'      => $this->guzzleResponseBody($e),
+                'paymentId' => $paymentId,
+            ]);
+            throw ApiException::serviceUnavailable(
+                'NotchPay est momentanément indisponible. Réessayez dans quelques instants.'
+            );
         }
     }
 

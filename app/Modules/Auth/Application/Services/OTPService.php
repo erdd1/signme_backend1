@@ -4,7 +4,8 @@ namespace App\Modules\Auth\Application\Services;
 
 use App\Models\OTPCode;
 use App\Models\User;
-use Illuminate\Support\Facades\Mail;
+use App\Modules\Auth\Notifications\OTPCodeNotification;
+use Illuminate\Support\Facades\Notification;
 
 /**
  * OTPService
@@ -129,27 +130,15 @@ class OTPService
         string $type
     ): bool {
         try {
-            $subject = match($type) {
-                'email_verification' => 'Vérification de votre adresse email - EEC SignCard',
-                'mfa'                => 'Code d\'authentification - EEC SignCard',
-                'password_reset'     => 'Code de réinitialisation - EEC SignCard',
-                default              => 'Code de sécurité - EEC SignCard',
-            };
+            Notification::route('mail', $email)
+                ->notify(new OTPCodeNotification($code, $type, $user->nom));
 
-            $message = match($type) {
-                'email_verification' => "Utilisez ce code pour vérifier votre email: $code\n\nCode valide pendant 10 minutes.",
-                'mfa'                => "Utilisez ce code pour activer la double authentification: $code\n\nCode valide pendant 10 minutes.",
-                'password_reset'     => "Utilisez ce code pour réinitialiser votre mot de passe: $code\n\nCode valide pendant 10 minutes.",
-                default              => "Votre code de sécurité: $code\n\nCode valide pendant 10 minutes.",
-            };
-
-            // TODO: Intégrer vrai système d'email (SendGrid, Mailgun, etc)
-            // Pour maintenant, loguer juste
-            \Log::info("OTP Email envoyé", [
+            // Ne jamais logger le code lui-même (voir PHASE audit sécurité) :
+            // un accès aux logs ne doit jamais suffire à usurper un OTP.
+            \Log::info('OTP Email envoyé', [
                 'user_id' => $user->id,
                 'email'   => $email,
                 'type'    => $type,
-                'code'    => $code,
             ]);
 
             return true;
