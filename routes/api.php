@@ -284,8 +284,13 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     Route::get('/contributions/transaction/{uuid}/status', [ContributionController::class, 'status']);
 
     // Onglet drawer "Contributions événement" - Pasteur/Secrétaire/Trésorier
-    Route::get('/contributions-evenements', [ContributionController::class, 'allForTreasury'])
-         ->middleware('role:pasteur,secretaire,tresorier');
+    // ⚠ Les routes statiques /stats et /filters/events sont déclarées AVANT la
+    // route de liste pour éviter tout conflit de capture par le routeur Laravel.
+    Route::middleware('role:pasteur,secretaire,tresorier')->group(function () {
+        Route::get('/contributions-evenements/stats',           [ContributionController::class, 'treasuryStats']);
+        Route::get('/contributions-evenements/filters/events',  [ContributionController::class, 'filterEvents']);
+        Route::get('/contributions-evenements',                 [ContributionController::class, 'allForTreasury']);
+    });
 
     // =========================================================================
     // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)
@@ -537,7 +542,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::get('/{uuid}/contributions',    [ContributionController::class, 'index']);
     });
 
-    Route::get('/contributions-evenements', [ContributionController::class, 'allForTreasury']);
+    // ⚠ Routes statiques avant la route de liste (même raison que côté client).
+    Route::get('/contributions-evenements/stats',          [ContributionController::class, 'treasuryStats']);
+    Route::get('/contributions-evenements/filters/events', [ContributionController::class, 'filterEvents']);
+    Route::get('/contributions-evenements',                [ContributionController::class, 'allForTreasury']);
 
     // ─── Actions avancées contribution (détail complet, revérification, logs) ──
     // Scopé par uuid (jamais par id numérique, cohérent avec tout le module

@@ -89,8 +89,13 @@ class ContributionController extends Controller
     public function allForTreasury(Request $request): JsonResponse
     {
         $perPage = min((int) $request->get('per_page', 20), 100);
-        $statut = $request->get('status');
-        $contributions = $this->contributionService->listAllForTreasury($request->user(), $perPage, $statut);
+        $filters = $request->only(['event_id', 'group_id', 'year', 'month']);
+
+        $contributions = $this->contributionService->listAllForTreasuryFiltered(
+            $request->user(),
+            $filters,
+            $perPage
+        );
 
         return $this->paginatedResponse(
             $contributions->setCollection(
@@ -99,6 +104,39 @@ class ContributionController extends Controller
             'Contributions récupérées avec succès.'
         );
     }
+
+    /**
+     * GET /contributions-evenements/stats
+     *
+     * Statistiques financières agrégées des contributions "completed" de l'église,
+     * filtrables par event_id, group_id, year, month (combinaison libre).
+     *
+     * Utilisé par le Card de synthèse globale (sans filtre) et le Card "Résumé
+     * de la sélection" (avec filtres actifs) — côté mobile trésorerie.
+     */
+    public function treasuryStats(Request $request): JsonResponse
+    {
+        $filters = $request->only(['event_id', 'group_id', 'year', 'month']);
+        $stats   = $this->contributionService->getTreasuryStats($request->user(), $filters);
+
+        return $this->successResponse($stats, 'Statistiques récupérées avec succès.');
+    }
+
+    /**
+     * GET /contributions-evenements/filters/events
+     *
+     * Liste des événements ayant au moins une contribution "completed" dans
+     * l'église de l'utilisateur authentifié. Alimente le dropdown "Événement"
+     * des filtres du tableau de bord — données exhaustives, indépendantes
+     * de la pagination de la liste des contributions.
+     */
+    public function filterEvents(Request $request): JsonResponse
+    {
+        $events = $this->contributionService->getEvenementsAvecContributions($request->user());
+
+        return $this->successResponse($events, 'Événements récupérés avec succès.');
+    }
+
 
     // =========================================================================
     // ADMIN — Actions avancées (détail, revérification, logs, reçu)

@@ -342,4 +342,127 @@ class ContributionService
 
         return $query->orderByDesc('created_at')->paginate($perPage);
     }
+
+    /**
+     * Liste filtrée des contributions "completed" de l'église (tableau de bord
+     * contributions — vue mobile trésorerie).
+     *
+     * Filtres combinables :
+     *   - event_id  : ID de l'événement
+     *   - group_id  : ID du groupe du contributeur
+     *   - year      : année de la contribution (created_at)
+     *   - month     : mois de la contribution (created_at, 1-12)
+     *
+     * Toujours scopé à l'église de l'utilisateur authentifié (sauf admin).
+     * Statut forcé à "completed" : les paiements en attente/échoués ne sont
+     * pas exposés dans cette vue (réservé au panel admin pour audit).
+     */
+    public function listAllForTreasuryFiltered(
+        User $authUser,
+        array $filters = [],
+        int $perPage = 20
+    ): LengthAwarePaginator {
+        $query = Contribution::query()
+            ->with(['user.groupes', 'evenement', 'groupe'])
+            ->where('statut', Contribution::STATUT_COMPLETED);
+
+        if (!$authUser->isAdmin()) {
+            $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
+        }
+
+        if (!empty($filters['event_id'])) {
+            $query->where('evenementId', (int) $filters['event_id']);
+        }
+
+        if (!empty($filters['group_id'])) {
+            $query->where('groupeId', (int) $filters['group_id']);
+        }
+
+        if (!empty($filters['year'])) {
+            $query->whereYear('created_at', (int) $filters['year']);
+        }
+
+        if (!empty($filters['month'])) {
+            $query->whereMonth('created_at', (int) $filters['month']);
+        }
+
+        return $query->orderByDesc('created_at')->paginate($perPage);
+    }
+
+    /**
+     * Calcule les statistiques financières agrégées des contributions "completed"
+     * de l'église selon les mêmes filtres combinables que listAllForTreasuryFiltered.
+     *
+     * Retourne :
+     *   - total_paye  : SUM(montantTotal) — ce que les contributeurs ont effectivement payé
+     *   - total_frais : SUM(frais)        — frais prélevés sur les transactions
+     *   - net_recu    : SUM(montant)      — montant net revenant à l'église
+     *   - count       : nombre de contributions correspondant aux filtres
+     *
+     * Formule vérifiable : total_paye = net_recu + total_frais.
+     */
+    public function getTreasuryStats(User $authUser, array $filters = []): array
+    {
+        $query = Contribution::query()
+            ->where('statut', Contribution::STATUT_COMPLETED);
+
+        if (!$authUser->isAdmin()) {
+            $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
+        }
+
+        if (!empty($filters['event_id'])) {
+            $query->where('evenementId', (int) $filters['event_id']);
+        }
+
+        if (!empty($filters['group_id'])) {
+            $query->where('groupeId', (int) $filters['group_id']);
+        }
+
+        if (!empty($filters['year'])) {
+            $query->whereYear('created_at', (int) $filters['year']);
+        }
+
+        if (!empty($filters['month'])) {
+            $query->whereMonth('created_at', (int) $filters['month']);
+        }
+
+        $result = $query->selectRaw(
+            'COALESCE(SUM(montantTotal), 0) as total_paye,
+             COALESCE(SUM(frais), 0)        as total_frais,
+             COALESCE(SUM(montant), 0)      as net_recu,
+             COUNT(*)                        as count'
+        )->first();
+
+        return [
+            'total_paye'  => (int) ($result->total_paye ?? 0),
+            'total_frais' => (int) ($result->total_frais ?? 0),
+            'net_recu'    => (int) ($result->net_recu ?? 0),
+            'count'       => (int) ($result->count ?? 0),
+        ];
+    }
+
+    /**
+     * Retourne les événements distincts ayant au moins une contribution
+     * "completed" dans l'église de l'utilisateur authentifié.
+     *
+     * Utilisé pour alimenter le dropdown "Événement" des filtres du tableau
+     * de bord — garantit que seuls les événements réellement contribués
+     * apparaissent, indépendamment de la pagination de la liste.
+     *
+     * @return \Illuminate\Support\Collection<int, array{id: int, uuid: string, titre: string}>
+     */
+    public function getEvenementsAvecContributions(User $authUser): \Illuminate\Support\Collection
+    {
+        return Evenement::query()
+            ->select(['evenements.id', 'evenements.uuid', 'evenements.titre'])
+            ->whereHas('contributions', fn ($q) => $q->where('statut', Contribution::STATUT_COMPLETED))
+            ->when(!$authUser->isAdmin(), fn ($q) => $q->where('evenements.churchId', $authUser->churchId))
+            ->orderBy('evenements.titre')
+            ->get()
+            ->map(fn ($e) => [
+                'id'    => $e->id,
+                'uuid'  => $e->uuid,
+                'titre' => $e->titre,
+            ]);
+    }
 }
