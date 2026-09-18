@@ -14,9 +14,14 @@ use Illuminate\Support\Facades\Broadcast;
 */
 
 // ── Canal de l'église ──────────────────────────────────────────────────────
-// Tous les membres de cette église peuvent écouter les publications, annonces.
+// Tous les membres de cette église peuvent écouter les publications, annonces
+// (+ admin, qui voit toutes les églises — voir User::belongsToChurch()).
+// ⚠ User::$churchId est en camelCase (pas de colonne/accesseur "church_id") :
+// `$user->church_id` renvoie toujours null et faisait donc échouer CETTE
+// autorisation pour TOUT utilisateur réel — aucun abonnement au canal de son
+// église ne pouvait jamais réussir, cassant le temps réel des publications.
 Broadcast::channel('church.{churchId}', function ($user, int $churchId) {
-    return (int) $user->church_id === $churchId;
+    return $user->belongsToChurch($churchId);
 });
 
 // ── Canal personnel de l'utilisateur ──────────────────────────────────────
