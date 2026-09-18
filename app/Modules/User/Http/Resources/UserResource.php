@@ -22,6 +22,7 @@ class UserResource extends JsonResource
             'nom'                => $this->nom,
             'email'              => $this->email,
             'role'               => $this->role,
+            'isSuperAdmin'       => $this->when($this->role === 'administrateur', (bool) $this->is_super_admin),
             'churchId'           => $this->churchId,
             'actif'              => $this->actif,
             'est_de_service'     => $this->est_de_service,

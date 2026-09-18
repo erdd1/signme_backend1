@@ -131,6 +131,8 @@ class AuthService
 
         if ($this->mfaService->isMFAEnabled($user)) {
             if (!$otp) {
+                $this->mfaService->sendLoginOtpIfEmailType($user);
+
                 throw ApiException::unauthorized(
                     'Authentification à deux facteurs requise. Veuillez fournir le code OTP.',
                     ['mfa_required' => true]
@@ -230,6 +232,8 @@ class AuthService
 
         if ($this->mfaService->isMFAEnabled($user)) {
             if (!$otp) {
+                $this->mfaService->sendLoginOtpIfEmailType($user);
+
                 throw ApiException::unauthorized(
                     'Authentification à deux facteurs requise. Veuillez fournir le code OTP.',
                     ['mfa_required' => true]
@@ -326,6 +330,20 @@ class AuthService
             ];
         }
 
+        // Mini-admin : renvoyer sa grille de permissions au login pour que le
+        // dashboard puisse masquer les modules non autorisés dès l'affichage
+        // — un super admin n'en a pas besoin (accès total implicite).
+        $permissions = null;
+        if ($user->isAdmin() && !$user->isSuperAdmin()) {
+            $permissions = $user->permissions->map(fn (\App\Models\AdminPermission $p) => [
+                'resource'   => $p->resource,
+                'can_view'   => $p->can_view,
+                'can_create' => $p->can_create,
+                'can_update' => $p->can_update,
+                'can_delete' => $p->can_delete,
+            ])->values()->all();
+        }
+
         return new AuthEntity(
             id:             $user->id,
             nom:            $user->nom,
@@ -339,6 +357,8 @@ class AuthService
             refreshToken:   $refreshToken, // Nouveau : refresh token
             church:         $churchData,    // Nouvelles : données complètes de l'église
             mfaSetupRequired: $mfaSetupRequired,
+            isSuperAdmin:   $user->isSuperAdmin(),
+            permissions:    $permissions,
         );
     }
 

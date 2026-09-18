@@ -50,6 +50,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.actif'      => \App\Http\Middleware\CheckActif::class,
             'ancien.service'   => \App\Http\Middleware\CheckAncienDeService::class,
             'mfa.enabled'      => \App\Http\Middleware\EnsureMfaEnabled::class,
+            'permission'       => \App\Http\Middleware\CheckAdminPermission::class,
+            'super.admin'      => \App\Http\Middleware\EnsureSuperAdmin::class,
         ]);
 
         // =====================================================================

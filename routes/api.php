@@ -24,6 +24,7 @@ use App\Modules\UserLookup\Http\VilleController;
 use App\Modules\Support\Http\SupportController;
 use App\Modules\Push\Http\DeviceTokenController;
 use App\Modules\System\Http\SystemController;
+use App\Modules\AdminAccess\Http\AdminAccessController;
 
 /*
 |=============================================================================
@@ -428,7 +429,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN USER MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('users')->group(function () {
+    Route::prefix('users')->middleware('permission:users')->group(function () {
         Route::get('/',         [UserController::class, 'index']);
         Route::post('/',        [UserController::class, 'store']);
         // AVANT /{id} pour éviter le conflit de capture.
@@ -443,19 +444,19 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN LISTES GÉRÉES (Groupe/Quartier/Ville) — Full CRUD, aucune restriction
     // =========================================================================
-    Route::prefix('groupes')->group(function () {
+    Route::prefix('groupes')->middleware('permission:lookups')->group(function () {
         Route::get('/',        [GroupeController::class, 'index']);
         Route::post('/',       [GroupeController::class, 'store']);
         Route::delete('/{id}', [GroupeController::class, 'destroy']);
     });
 
-    Route::prefix('quartiers')->group(function () {
+    Route::prefix('quartiers')->middleware('permission:lookups')->group(function () {
         Route::get('/',        [QuartierController::class, 'index']);
         Route::post('/',       [QuartierController::class, 'store']);
         Route::delete('/{id}', [QuartierController::class, 'destroy']);
     });
 
-    Route::prefix('villes')->group(function () {
+    Route::prefix('villes')->middleware('permission:lookups')->group(function () {
         Route::get('/',        [VilleController::class, 'index']);
         Route::post('/',       [VilleController::class, 'store']);
         Route::delete('/{id}', [VilleController::class, 'destroy']);
@@ -464,7 +465,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN CHURCHES MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('churches')->group(function () {
+    Route::prefix('churches')->middleware('permission:churches')->group(function () {
         Route::get('/',             [ChurchController::class, 'index']);
         Route::post('/',            [ChurchController::class, 'store']);
         Route::get('/{id}',         [ChurchController::class, 'show']);
@@ -476,7 +477,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN SIGNATURE MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('signatures')->group(function () {
+    Route::prefix('signatures')->middleware('permission:signatures')->group(function () {
         Route::get('/',               [SignatureController::class, 'index']);
         Route::post('/',              [SignatureController::class, 'store']);
         // ── Routes statiques AVANT /{id} pour éviter le conflit de capture ──
@@ -494,7 +495,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN SIGNATURE LOGS (Audit/Traçabilité) — READ ONLY
     // =========================================================================
-    Route::prefix('signature-logs')->group(function () {
+    Route::prefix('signature-logs')->middleware('permission:signatures')->group(function () {
         Route::get('/',                  [SignatureLogsAdminController::class, 'index']);
         Route::get('/stats',             [SignatureLogsAdminController::class, 'stats']);
         Route::get('/{id}',              [SignatureLogsAdminController::class, 'show']);
@@ -504,7 +505,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN ANCIEN DESIGNATION MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('anciens-designations')->group(function () {
+    Route::prefix('anciens-designations')->middleware('permission:anciens_designations')->group(function () {
         Route::get('/',           [AncienDesignationController::class, 'index']);
         Route::post('/',          [AncienDesignationController::class, 'store']);
         Route::get('/{id}',       [AncienDesignationController::class, 'show']);
@@ -516,7 +517,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN PUBLICATIONS MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('publications')->group(function () {
+    Route::prefix('publications')->middleware('permission:publications')->group(function () {
         Route::get('/',       [PublicationController::class, 'index']);
         Route::post('/',      [PublicationController::class, 'store']);
         Route::get('/{id}',   [PublicationController::class, 'show']);
@@ -529,7 +530,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // L'admin bypass la contrainte "auteur uniquement" (cf. EvenementService).
     // Aucune route delete : suppression jamais exposée (légal/comptable).
     // =========================================================================
-    Route::prefix('evenements')->group(function () {
+    Route::prefix('evenements')->middleware('permission:evenements')->group(function () {
         Route::get('/',                        [EvenementController::class, 'index']);
         Route::get('/gestion',                 [EvenementController::class, 'gestion']);
         Route::get('/{uuid}',                  [EvenementController::class, 'show']);
@@ -543,27 +544,29 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::get('/{uuid}/contributions',    [ContributionController::class, 'index']);
     });
 
-    // ⚠ Routes statiques avant la route de liste (même raison que côté client).
-    Route::get('/contributions-evenements/stats',          [ContributionController::class, 'treasuryStats']);
-    Route::get('/contributions-evenements/filters/events', [ContributionController::class, 'filterEvents']);
-    Route::get('/contributions-evenements',                [ContributionController::class, 'allForTreasury']);
+    Route::middleware('permission:evenements')->group(function () {
+        // ⚠ Routes statiques avant la route de liste (même raison que côté client).
+        Route::get('/contributions-evenements/stats',          [ContributionController::class, 'treasuryStats']);
+        Route::get('/contributions-evenements/filters/events', [ContributionController::class, 'filterEvents']);
+        Route::get('/contributions-evenements',                [ContributionController::class, 'allForTreasury']);
 
-    // ─── Actions avancées contribution (détail complet, revérification, logs) ──
-    // Scopé par uuid (jamais par id numérique, cohérent avec tout le module
-    // Evenement — pas de collision avec le préfixe client
-    // contributions/transaction/{uuid}/status, préfixe complet différent).
-    Route::prefix('contributions')->group(function () {
-        Route::get('/{uuid}/detail',    [ContributionController::class, 'detail']);
-        Route::get('/{uuid}/events',    [ContributionController::class, 'events']);
-        Route::get('/{uuid}/sync-logs', [ContributionController::class, 'syncLogs']);
-        Route::post('/{uuid}/recheck',  [ContributionController::class, 'recheck']);
-        Route::get('/{uuid}/receipt',   [ContributionController::class, 'receipt']);
+        // ─── Actions avancées contribution (détail complet, revérification, logs) ──
+        // Scopé par uuid (jamais par id numérique, cohérent avec tout le module
+        // Evenement — pas de collision avec le préfixe client
+        // contributions/transaction/{uuid}/status, préfixe complet différent).
+        Route::prefix('contributions')->group(function () {
+            Route::get('/{uuid}/detail',    [ContributionController::class, 'detail']);
+            Route::get('/{uuid}/events',    [ContributionController::class, 'events']);
+            Route::get('/{uuid}/sync-logs', [ContributionController::class, 'syncLogs']);
+            Route::post('/{uuid}/recheck',  [ContributionController::class, 'recheck']);
+            Route::get('/{uuid}/receipt',   [ContributionController::class, 'receipt']);
+        });
     });
 
     // =========================================================================
     // ADMIN PAYMENT/SIGNATURE PAYMENT MANAGEMENT (Full CRUD)
     // =========================================================================
-    Route::prefix('payments')->group(function () {
+    Route::prefix('payments')->middleware('permission:payments')->group(function () {
         Route::get('/',           [PaymentController::class, 'index']);
         Route::post('/',          [PaymentController::class, 'store']);
         Route::get('/{id}',       [PaymentController::class, 'show']);
@@ -582,7 +585,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // =========================================================================
     // ADMIN RAPPORT ENDPOINTS
     // =========================================================================
-    Route::prefix('rapports')->group(function () {
+    Route::prefix('rapports')->middleware('permission:rapports')->group(function () {
         Route::get('/secretaire',  [RapportController::class, 'secretaire']);
         Route::get('/finances/annuel',  [RapportController::class, 'financesAnnuel']);
         Route::get('/finances/mois',    [RapportController::class, 'financesMois']);
@@ -598,8 +601,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
 
     // =========================================================================
     // ADMIN SYSTEM (Maintenance production : santé, sauvegardes, mode maintenance)
+    // Réservé au super admin — jamais accordable via admin_permissions (trop
+    // risqué pour être délégué : sauvegardes, restauration destructrice,
+    // coupure de service).
     // =========================================================================
-    Route::prefix('system')->group(function () {
+    Route::prefix('system')->middleware('super.admin')->group(function () {
         Route::get('/health', [SystemController::class, 'health']);
 
         Route::get('/backups', [SystemController::class, 'listBackups']);
@@ -613,6 +619,18 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
 
         Route::get('/logs', [SystemController::class, 'logs']);
         Route::get('/logs/download', [SystemController::class, 'downloadLog']);
+    });
+
+    // =========================================================================
+    // ADMIN ACCESS (Gestion des mini-admins et de leurs permissions)
+    // Réservé au super admin exclusivement.
+    // =========================================================================
+    Route::prefix('admin-access')->middleware('super.admin')->group(function () {
+        Route::get('/resources', [AdminAccessController::class, 'resources']);
+        Route::get('/', [AdminAccessController::class, 'index']);
+        Route::post('/', [AdminAccessController::class, 'store']);
+        Route::get('/{id}', [AdminAccessController::class, 'show']);
+        Route::put('/{id}/permissions', [AdminAccessController::class, 'updatePermissions']);
     });
 
     }); // fin mfa.enabled

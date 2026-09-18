@@ -121,6 +121,7 @@ use Laravel\Sanctum\HasApiTokens;
     {
         return [
             'actif'                                => 'boolean',
+            'is_super_admin'                       => 'boolean',
             'est_de_service'                       => 'boolean',
             'dateConfirmation'                     => 'date',
             'dateNaissance'                         => 'date',
@@ -256,11 +257,56 @@ use Laravel\Sanctum\HasApiTokens;
         return $this->hasMany(OTPCode::class);
     }
 
+    /**
+     * Permissions admin par module (mini-admins uniquement — sans effet
+     * pour un super admin, qui a toujours accès à tout).
+     */
+    public function permissions(): HasMany
+    {
+        return $this->hasMany(AdminPermission::class);
+    }
+
     // ─── Helpers de rôle ──────────────────────────────────────────────────────
 
     public function isAdmin(): bool
     {
         return $this->role === self::ROLE_ADMIN;
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->isAdmin() && $this->is_super_admin;
+    }
+
+    /**
+     * Un super admin a toujours accès à tout. Un mini-admin n'a accès à un
+     * module que si une ligne admin_permissions existe explicitement pour
+     * ce module avec l'action demandée activée — l'absence de ligne
+     * équivaut à "tout refusé", jamais à "tout autorisé".
+     */
+    public function hasPermission(string $resource, string $action): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        if (!$this->isAdmin()) {
+            return false;
+        }
+
+        $column = match ($action) {
+            'view' => 'can_view',
+            'create' => 'can_create',
+            'update' => 'can_update',
+            'delete' => 'can_delete',
+            default => null,
+        };
+
+        if ($column === null) {
+            return false;
+        }
+
+        return $this->permissions->firstWhere('resource', $resource)?->{$column} ?? false;
     }
 
     public function isPasteur(): bool

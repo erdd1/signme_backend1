@@ -24,6 +24,8 @@ final class AuthEntity
         public readonly ?string $refreshToken = null, // Refresh token (PHASE 1)
         public readonly ?array  $church = null,       // Données de l'église
         public readonly bool    $mfaSetupRequired = false, // Dashboard admin : MFA pas encore configuré
+        public readonly bool    $isSuperAdmin = false, // Dashboard admin : super admin vs mini-admin
+        public readonly ?array  $permissions = null,   // Dashboard admin : grille de permissions du mini-admin
     ) {}
 
     public function toArray(): array
@@ -39,7 +41,12 @@ final class AuthEntity
             'photoUrl'         => $this->photoUrl,
             'access_token'     => $this->token,
             'mfaSetupRequired' => $this->mfaSetupRequired,
+            'isSuperAdmin'     => $this->isSuperAdmin,
         ];
+
+        if ($this->permissions !== null) {
+            $data['permissions'] = $this->permissions;
+        }
 
         // Inclure les données de l'église si disponible
         if ($this->church) {

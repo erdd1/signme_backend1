@@ -47,12 +47,15 @@ class UserFactory extends Factory
     }
 
     /**
-     * Indicate that the user is an administrator.
+     * Indicate that the user is an administrator. Super admin by default —
+     * les tests existants supposent un accès total ; utiliser explicitement
+     * ->state(['is_super_admin' => false]) pour tester un mini-admin restreint.
      */
     public function admin(): static
     {
         return $this->state(fn (array $attributes) => [
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
     }
 

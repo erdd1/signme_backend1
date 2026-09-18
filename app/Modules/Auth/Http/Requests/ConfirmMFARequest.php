@@ -15,8 +15,12 @@ class ConfirmMFARequest extends FormRequest
 
     public function rules(): array
     {
+        // Miroir de LoginRequest : accepte aussi un code de secours (8
+        // caractères hexadécimaux) en plus du code à 6 chiffres reçu par
+        // email — MFAService::confirmMFASetup() gère déjà les deux, seule
+        // cette validation empêchait le second de passer.
         return [
-            'otp' => ['required', 'string', 'size:6', 'regex:/^\d{6}$/'],
+            'otp' => ['required', 'string', 'regex:/^(\d{6}|[0-9A-F]{8})$/'],
         ];
     }
 
@@ -24,8 +28,7 @@ class ConfirmMFARequest extends FormRequest
     {
         return [
             'otp.required' => 'Le code OTP est obligatoire.',
-            'otp.size'     => 'Le code OTP doit contenir 6 chiffres.',
-            'otp.regex'    => 'Le code OTP doit être uniquement des chiffres.',
+            'otp.regex'    => 'Le code doit être un code à 6 chiffres ou un code de secours à 8 caractères.',
         ];
     }
 

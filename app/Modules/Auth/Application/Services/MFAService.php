@@ -34,6 +34,28 @@ class MFAService
     }
 
     /**
+     * Envoie un nouveau code de connexion par email si le type MFA de
+     * l'utilisateur est "email" — un type basé sur une app (TOTP) n'en a
+     * pas besoin, l'utilisateur génère son propre code.
+     *
+     * À appeler au moment précis où la connexion réclame ce second
+     * facteur (avant de lever l'exception "mfa_required") : sans ça,
+     * enableMFA() n'envoie un code qu'une seule fois, lors de la toute
+     * première configuration — plus aucun code n'est jamais renvoyé aux
+     * connexions suivantes, bloquant définitivement tout utilisateur en
+     * MFA email (le formulaire de connexion promet pourtant un code
+     * "envoyé à" l'email à chaque tentative).
+     */
+    public function sendLoginOtpIfEmailType(User $user): void
+    {
+        $mfa = MFACredential::where('user_id', $user->id)->first();
+
+        if ($mfa && $mfa->isEnabled() && $mfa->mfa_type === 'email') {
+            $this->otpService->generateAndSendOTP($user, 'mfa');
+        }
+    }
+
+    /**
      * Activer MFA (via email pour Phase 2)
      */
     public function enableMFA(User $user, string $type = 'email'): array
@@ -70,9 +92,17 @@ class MFAService
      */
     public function confirmMFASetup(User $user, string $otp): bool
     {
-        $result = $this->otpService->verifyOTP($user, $otp, 'mfa');
+        $mfa = MFACredential::where('user_id', $user->id)->first();
 
-        if (!$result['valid']) {
+        // Code emailé d'abord, code de secours (affiché à l'étape précédente
+        // de la configuration) en repli — même logique qu'à la connexion
+        // normale (voir verifySecondFactor()), pour ne jamais bloquer
+        // quelqu'un dont l'email tarde à arriver alors qu'il a déjà ses
+        // codes de secours sous les yeux.
+        $result = $this->otpService->verifyOTP($user, $otp, 'mfa');
+        $validated = $result['valid'] || ($mfa && $mfa->useBackupCode($otp));
+
+        if (!$validated) {
             $this->securityLogService->log(
                 action: 'mfa_verification_failed',
                 status: 'failed',
@@ -83,7 +113,6 @@ class MFAService
         }
 
         // Activer MFA maintenant
-        $mfa = MFACredential::where('user_id', $user->id)->first();
         $mfa->enable();
 
         $this->securityLogService->log(

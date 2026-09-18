@@ -233,6 +233,18 @@ class UserService
     {
         $user = $this->findById($authUser, $targetId);
 
+        // Seul le super admin peut modifier un compte administrateur (y
+        // compris un mini-admin avec le droit "modifier" sur Utilisateurs) —
+        // et seul lui peut promouvoir quelqu'un vers ce rôle.
+        if (
+            (($user->isAdmin() && !$authUser->isSuperAdmin()))
+            || (isset($data['role']) && $data['role'] === User::ROLE_ADMIN && !$authUser->isSuperAdmin())
+        ) {
+            throw ApiException::forbidden(
+                'Seul le super administrateur peut modifier un compte administrateur.'
+            );
+        }
+
         // Empêcher la modification de rôle par une secrétaire
         if ($authUser->isSecretaire() && isset($data['role'])) {
             throw ApiException::forbidden('Une secrétaire ne peut pas modifier les rôles.');
@@ -400,8 +412,10 @@ class UserService
 
         $user = $this->findById($authUser, $targetId);
 
-        // Ne pas désactiver un admin
-        if ($user->isAdmin() && !$authUser->isAdmin()) {
+        // Ne pas désactiver un admin — réservé au super admin (un mini-admin
+        // avec le droit "modifier" sur Utilisateurs ne doit jamais pouvoir
+        // désactiver un autre administrateur, encore moins le super admin).
+        if ($user->isAdmin() && !$authUser->isSuperAdmin()) {
             throw ApiException::forbidden('Vous ne pouvez pas désactiver un administrateur.');
         }
 
@@ -530,6 +544,16 @@ class UserService
 
     private function assertCanCreateRole(User $authUser, string $role): void
     {
+        // Seul le super admin peut créer un nouveau compte administrateur —
+        // sans ça, un mini-admin avec le droit "créer" sur Utilisateurs
+        // pourrait se créer un accès total en passant par cet endpoint
+        // générique, en contournant entièrement le système de permissions.
+        if ($role === User::ROLE_ADMIN && !$authUser->isSuperAdmin()) {
+            throw ApiException::forbidden(
+                'Seul le super administrateur peut créer un compte administrateur.'
+            );
+        }
+
         if ($authUser->isAdmin()) return;
 
         if ($authUser->isPasteur() && !in_array($role, self::ROLES_PASTEUR, true)) {
