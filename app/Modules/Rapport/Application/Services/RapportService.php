@@ -5,6 +5,7 @@ namespace App\Modules\Rapport\Application\Services;
 use App\Models\Signature;
 use App\Models\User;
 use App\Core\Exceptions\ApiException;
+use App\Core\Helpers\DbCompat;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -33,12 +34,18 @@ class RapportService
     {
         $egliseId = $this->resolveChurchId($authUser, $churchId);
 
-        // Tous les membres paroissiens actifs de l'église
-        $membres = User::where('churchId', $egliseId)
+        // Tous les fidèles actifs de l'église (tous rôles — ils signent tous
+        // leur carte, quel que soit leur rôle).
+        $tousLesFideles = User::where('churchId', $egliseId)
                        ->where('actif', true)
                        ->whereIn('role', ['paroissien', 'ancien', 'secretaire', 'tresorier', 'pasteur'])
                        ->orderBy('nom')
-                       ->get(['id', 'nom', 'email', 'role', 'photoUrl']);
+                       ->get(['id', 'nom', 'email', 'role', 'photoUrl', 'estCommuniant']);
+
+        // Seuls les communiants participent à la sainte cène : un paroissien
+        // non communiant est dissocié du suivi signé/non signé (il n'a
+        // simplement pas de carte à signer).
+        $membres = $tousLesFideles->where('estCommuniant', true)->values();
 
         // Signatures complétées pour ce mois
         $signesIds = Signature::where('churchId', $egliseId)
@@ -90,6 +97,7 @@ class RapportService
         return [
             'month'          => $monthKey,
             'eglise_id'      => $egliseId,
+            'total_fideles'  => $tousLesFideles->count(),
             'total_membres'  => count($membres),
             'total_signes'   => count($signes),
             'total_non_signes' => count($nonSignes),
@@ -134,6 +142,7 @@ class RapportService
         ];
 
         // Agrégation par mois pour l'année donnée (index churchId + year + monthIndex)
+        $signatureTypeCol = DbCompat::quoteColumn('signatureType');
         $data = Signature::where('churchId', $egliseId)
                          ->where('year', $year)
                          ->where('status', 'completed')
@@ -144,10 +153,10 @@ class RapportService
                              DB::raw('SUM(amount) as total_offrandes'),
                              DB::raw('SUM(fees) as total_frais'),
                              DB::raw('SUM(amount + fees) as total_encaisse'),
-                             DB::raw('SUM(CASE WHEN signatureType = "presentiel" THEN amount ELSE 0 END) as montant_presentiel'),
-                             DB::raw('SUM(CASE WHEN signatureType = "distance" THEN amount ELSE 0 END) as montant_distance'),
-                             DB::raw('COUNT(CASE WHEN signatureType = "presentiel" THEN 1 END) as nb_presentiel'),
-                             DB::raw('COUNT(CASE WHEN signatureType = "distance" THEN 1 END) as nb_distance'),
+                             DB::raw("SUM(CASE WHEN $signatureTypeCol = 'presentiel' THEN amount ELSE 0 END) as montant_presentiel"),
+                             DB::raw("SUM(CASE WHEN $signatureTypeCol = 'distance' THEN amount ELSE 0 END) as montant_distance"),
+                             DB::raw("COUNT(CASE WHEN $signatureTypeCol = 'presentiel' THEN 1 END) as nb_presentiel"),
+                             DB::raw("COUNT(CASE WHEN $signatureTypeCol = 'distance' THEN 1 END) as nb_distance"),
                          )
                          ->groupBy('monthIndex', 'month')
                          ->orderBy('monthIndex')
@@ -175,23 +184,34 @@ class RapportService
         }
 
         // Totaux annuels
-        $annualTotals = Signature::where('churchId', $egliseId)
-                                 ->where('year', $year)
-                                 ->where('status', 'completed')
-                                 ->selectRaw('COUNT(*) as total_signatures, SUM(amount) as total_offrandes, SUM(fees) as total_frais')
-                                 ->first();
+        // Totaux annuels — inclut désormais la répartition présentiel/distance,
+// frais inclus (amount + fees), pour donner à l'église une vision exacte
+// de ce qu'elle a perçu par canal de signature.
+$annualTotals = Signature::where('churchId', $egliseId)
+                         ->where('year', $year)
+                         ->where('status', 'completed')
+                         ->selectRaw(
+                             "COUNT(*) as total_signatures,
+                              SUM(amount) as total_offrandes,
+                              SUM(fees) as total_frais,
+                              SUM(CASE WHEN $signatureTypeCol = 'presentiel' THEN amount + fees ELSE 0 END) as total_presentiel,
+                              SUM(CASE WHEN $signatureTypeCol = 'distance' THEN amount + fees ELSE 0 END) as total_distance"
+                         )
+                         ->first();
 
-        return [
-            'year'           => $year,
-            'eglise_id'      => $egliseId,
-            'mois'           => $moisDetails,
-            'totaux_annuels' => [
-                'nb_signatures'   => $annualTotals?->total_signatures ?? 0,
-                'total_offrandes' => $annualTotals?->total_offrandes  ?? 0,
-                'total_frais'     => $annualTotals?->total_frais      ?? 0,
-                'total_encaisse'  => ($annualTotals?->total_offrandes ?? 0) + ($annualTotals?->total_frais ?? 0),
-            ],
-        ];
+            return [
+                        'year'           => $year,
+                        'eglise_id'      => $egliseId,
+                        'mois'           => $moisDetails,
+                        'totaux_annuels' => [
+                                                        'nb_signatures'    => $annualTotals?->total_signatures ?? 0,
+                                                        'total_offrandes'  => $annualTotals?->total_offrandes  ?? 0,
+                                                        'total_frais'      => $annualTotals?->total_frais      ?? 0,
+                                                        'total_encaisse'   => ($annualTotals?->total_offrandes ?? 0) + ($annualTotals?->total_frais ?? 0),
+                                                        'total_presentiel' => $annualTotals?->total_presentiel ?? 0,
+                                                        'total_distance'   => $annualTotals?->total_distance   ?? 0,
+    ],
+];
     }
 
     /**
@@ -254,40 +274,34 @@ class RapportService
     {
         $egliseId = $this->resolveChurchId($authUser, $churchId);
 
-        $signatures = Signature::where('churchId', $egliseId)
-                               ->where('month', $monthKey)
-                               ->where('status', 'completed')
-                               ->with('user:id,nom,photoUrl,role')
-                               ->orderByDesc('created_at')
-                               ->get();
-
-        // Distribution des montants
-        $distribution = $signatures->groupBy('amount')->map(fn($group) => [
-            'amount' => $group->first()->amount,
-            'count'  => $group->count(),
-            'total'  => $group->sum('amount'),
-        ])->values();
+        // Agrégats calculés en SQL (COUNT/SUM) — jamais charger chaque ligne
+        // de signature en mémoire juste pour les compter/sommer. La liste
+        // nominative des signataires n'est plus renvoyée ici : ce module
+        // n'affiche que des totaux, la liste existe déjà dans "Rapport
+        // secrétaire" (RapportSecretaireScreen), pas besoin de la dupliquer.
+        $signatureTypeCol = DbCompat::quoteColumn('signatureType');
+        $totals = Signature::where('churchId', $egliseId)
+            ->where('month', $monthKey)
+            ->where('status', 'completed')
+            ->selectRaw(
+                "COUNT(*) as nb_total,
+                 SUM(CASE WHEN $signatureTypeCol = 'presentiel' THEN 1 ELSE 0 END) as nb_presentiel,
+                 SUM(CASE WHEN $signatureTypeCol = 'distance' THEN 1 ELSE 0 END) as nb_distance,
+                 COALESCE(SUM(amount), 0) as montant_total,
+                 COALESCE(SUM(fees), 0) as frais_total,
+                 COALESCE(SUM(amount + fees), 0) as encaisse_total"
+            )
+            ->first();
 
         return [
-            'month'       => $monthKey,
-            'eglise_id'   => $egliseId,
-            'nb_total'    => $signatures->count(),
-            'nb_presentiel' => $signatures->where('signatureType', 'presentiel')->count(),
-            'nb_distance'   => $signatures->where('signatureType', 'distance')->count(),
-            'montant_total' => $signatures->sum('amount'),
-            'frais_total'   => $signatures->sum('fees'),
-            'encaisse_total'=> $signatures->sum(fn($s) => $s->amount + $s->fees),
-            'distribution_montants' => $distribution,
-            'signatures'  => $signatures->map(fn($s) => [
-                'id'            => $s->id,
-                'nomParoissien' => $s->nomParoissien,
-                'photoUrl'      => $s->user?->photoUrl,
-                'amount'        => $s->amount,
-                'fees'          => $s->fees,
-                'signatureType' => $s->signatureType,
-                'paymentMethod' => $s->paymentMethod,
-                'signed_at'     => $s->created_at->format('Y-m-d H:i'),
-            ])->values(),
+            'month'          => $monthKey,
+            'eglise_id'      => $egliseId,
+            'nb_total'       => (int) ($totals->nb_total ?? 0),
+            'nb_presentiel'  => (int) ($totals->nb_presentiel ?? 0),
+            'nb_distance'    => (int) ($totals->nb_distance ?? 0),
+            'montant_total'  => (int) ($totals->montant_total ?? 0),
+            'frais_total'    => (int) ($totals->frais_total ?? 0),
+            'encaisse_total' => (int) ($totals->encaisse_total ?? 0),
         ];
     }
 

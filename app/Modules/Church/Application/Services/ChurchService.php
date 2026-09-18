@@ -5,6 +5,7 @@ namespace App\Modules\Church\Application\Services;
 use App\Models\Church;
 use App\Models\User;
 use App\Core\Exceptions\ApiException;
+use App\Core\Helpers\DbCompat;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 /**
@@ -25,10 +26,11 @@ class ChurchService
 
         if (!empty($filters['search'])) {
             $search = '%' . $filters['search'] . '%';
-            $query->where(function ($q) use ($search) {
-                $q->where('nom', 'like', $search)
-                  ->orWhere('ville', 'like', $search)
-                  ->orWhere('region', 'like', $search);
+            $like = DbCompat::likeOperator();
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('nom', $like, $search)
+                  ->orWhere('ville', $like, $search)
+                  ->orWhere('region', $like, $search);
             });
         }
 

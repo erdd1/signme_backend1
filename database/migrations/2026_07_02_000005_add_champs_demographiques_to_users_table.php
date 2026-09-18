@@ -21,7 +21,12 @@ return new class extends Migration
         // réécriture de table déclenchée par l'ajout de contraintes FK
         // ci-dessous sous le mode strict MySQL — nettoyage sûr car
         // dateConfirmation est déjà nullable et ces valeurs sont inutilisables.
-        DB::table('users')->where('dateConfirmation', '0000-00-00')->update(['dateConfirmation' => null]);
+        // Spécifique à MySQL : PostgreSQL rejette '0000-00-00' comme valeur de
+        // paramètre invalide (aucune ligne PostgreSQL ne peut donc avoir cette
+        // valeur — rien à nettoyer sur ce moteur).
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            DB::table('users')->where('dateConfirmation', '0000-00-00')->update(['dateConfirmation' => null]);
+        }
 
         Schema::table('users', function (Blueprint $table) {
             $table->enum('sexe', ['homme', 'femme'])->nullable()->after('role');

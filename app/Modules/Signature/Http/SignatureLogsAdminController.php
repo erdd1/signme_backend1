@@ -3,6 +3,7 @@
 namespace App\Modules\Signature\Http;
 
 use App\Http\Controllers\Controller;
+use App\Core\Helpers\DbCompat;
 use App\Core\Traits\ApiResponseTrait;
 use App\Models\SignatureLog;
 use App\Core\Exceptions\ApiException;
@@ -58,7 +59,7 @@ class SignatureLogsAdminController extends Controller
         $perPage = min($request->integer('per_page', 50), 500);
         $logs = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
-        return $this->successResponse($logs, 'Logs de signatures récupérés.');
+        return $this->paginatedResponse($logs, 'Logs de signatures récupérés.');
     }
 
     /**
@@ -82,28 +83,36 @@ class SignatureLogsAdminController extends Controller
      * 
      * Récupère l'historique complet des tentatives de signature pour un utilisateur.
      */
-    public function userHistory(int $userId): JsonResponse
+    public function userHistory(Request $request, int $userId): JsonResponse
     {
-        $logs = SignatureLog::where('userId', $userId)
-                            ->orderBy('created_at', 'desc')
-                            ->get();
+        $query = SignatureLog::where('userId', $userId);
 
-        if ($logs->isEmpty()) {
+        if (!$query->clone()->exists()) {
             throw ApiException::notFound('Aucun historique de signature pour cet utilisateur.');
         }
 
-        // Compter par statut
+        // Stats calculées sur la table entière (pas sur la seule page
+        // affichée) — sinon elles varieraient selon la page courante.
         $stats = [
-            'total'      => $logs->count(),
-            'completed'  => $logs->where('status', 'completed')->count(),
-            'pending'    => $logs->where('status', 'pending')->count(),
-            'failed'     => $logs->where('status', 'failed')->count(),
+            'total'      => $query->clone()->count(),
+            'completed'  => $query->clone()->where('status', 'completed')->count(),
+            'pending'    => $query->clone()->where('status', 'pending')->count(),
+            'failed'     => $query->clone()->where('status', 'failed')->count(),
         ];
 
+        $perPage = min($request->integer('per_page', 50), 500);
+        $logs = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
         return $this->successResponse([
-            'user_id' => $userId,
-            'stats'   => $stats,
-            'logs'    => $logs,
+            'user_id'    => $userId,
+            'stats'      => $stats,
+            'logs'       => $logs->items(),
+            'pagination' => [
+                'current_page' => $logs->currentPage(),
+                'last_page'    => $logs->lastPage(),
+                'per_page'     => $logs->perPage(),
+                'total'        => $logs->total(),
+            ],
         ], 'Historique utilisateur récupéré.');
     }
 
@@ -144,7 +153,7 @@ class SignatureLogsAdminController extends Controller
                                     ->select('paymentMethod')
                                     ->where('status', 'completed')
                                     ->groupBy('paymentMethod')
-                                    ->selectRaw('paymentMethod, count(*) as count')
+                                    ->selectRaw(DbCompat::quoteColumn('paymentMethod') . ', count(*) as count')
                                     ->get()
                                     ->keyBy('paymentMethod')
                                     ->map(fn($item) => $item->count)

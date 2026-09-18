@@ -79,15 +79,21 @@ return [
             ]) : [],
         ],
 
+        // Variables d'environnement DÉDIÉES (DB_PGSQL_*, pas DB_*) : pendant la
+        // migration MySQL → PostgreSQL, les deux connexions doivent pouvoir
+        // coexister dans le même .env (mysql reste la connexion par défaut/live
+        // tant que la bascule n'est pas confirmée, pgsql est ciblée explicitement
+        // via `--database=pgsql`) — partager les mêmes variables DB_* casserait
+        // l'une des deux connexions (ports et identifiants différents).
         'pgsql' => [
             'driver' => 'pgsql',
-            'url' => env('DB_URL'),
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '5432'),
-            'database' => env('DB_DATABASE', 'laravel'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
-            'charset' => env('DB_CHARSET', 'utf8'),
+            'url' => env('DB_PGSQL_URL'),
+            'host' => env('DB_PGSQL_HOST', '127.0.0.1'),
+            'port' => env('DB_PGSQL_PORT', '5432'),
+            'database' => env('DB_PGSQL_DATABASE', 'laravel'),
+            'username' => env('DB_PGSQL_USERNAME', 'root'),
+            'password' => env('DB_PGSQL_PASSWORD', ''),
+            'charset' => env('DB_PGSQL_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
             'search_path' => 'public',

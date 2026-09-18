@@ -3,6 +3,7 @@
 namespace App\Modules\Evenement\Application\Services;
 
 use App\Core\Exceptions\ApiException;
+use App\Core\Helpers\DbCompat;
 use App\Core\Services\PaymentQueueHealthService;
 use App\Models\Contribution;
 use App\Models\Evenement;
@@ -48,6 +49,14 @@ class ContributionService
         // NotchPay : sinon l'utilisateur reçoit le PUSH de paiement mais le
         // serveur ne peut plus suivre sa confirmation (échec silencieux).
         $this->paymentQueueHealthService->ensureAvailable();
+
+        // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
+        // lève une erreur SQL pour une valeur mal formée, ce qui marque
+        // toute la transaction en cours comme invalide — voir le
+        // commentaire équivalent dans SortieFinanciereService::findByUuid().
+        if (!Str::isUuid($evenementUuid)) {
+            throw ApiException::notFound('Evenement');
+        }
 
         $evenement = Evenement::where('uuid', $evenementUuid)->first();
 
@@ -188,6 +197,14 @@ class ContributionService
      */
     public function getStatus(User $user, string $contributionUuid): Contribution
     {
+        // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
+        // lève une erreur SQL pour une valeur mal formée, ce qui marque
+        // toute la transaction en cours comme invalide — voir le
+        // commentaire équivalent dans SortieFinanciereService::findByUuid().
+        if (!Str::isUuid($contributionUuid)) {
+            throw ApiException::notFound('Contribution');
+        }
+
         $contribution = Contribution::where('uuid', $contributionUuid)
             ->where('userId', $user->id)
             ->first();
@@ -260,6 +277,14 @@ class ContributionService
      */
     public function findByUuidForAdmin(string $uuid): Contribution
     {
+        // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
+        // lève une erreur SQL pour une valeur mal formée, ce qui marque
+        // toute la transaction en cours comme invalide — voir le
+        // commentaire équivalent dans SortieFinanciereService::findByUuid().
+        if (!Str::isUuid($uuid)) {
+            throw ApiException::notFound('Contribution');
+        }
+
         $contribution = Contribution::where('uuid', $uuid)->first();
 
         if (!$contribution) {
@@ -306,6 +331,14 @@ class ContributionService
      */
     public function listForEvenement(User $authUser, string $evenementUuid, int $perPage = 20): LengthAwarePaginator
     {
+        // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
+        // lève une erreur SQL pour une valeur mal formée, ce qui marque
+        // toute la transaction en cours comme invalide — voir le
+        // commentaire équivalent dans SortieFinanciereService::findByUuid().
+        if (!Str::isUuid($evenementUuid)) {
+            throw ApiException::notFound('Evenement');
+        }
+
         $evenement = Evenement::where('uuid', $evenementUuid)->first();
 
         if (!$evenement) {
@@ -362,9 +395,35 @@ class ContributionService
         array $filters = [],
         int $perPage = 20
     ): LengthAwarePaginator {
-        $query = Contribution::query()
+        return $this->buildTreasuryQuery($authUser, $filters)
             ->with(['user.groupes', 'evenement', 'groupe'])
-            ->where('statut', Contribution::STATUT_COMPLETED);
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
+    }
+
+    /**
+     * Variante non paginée de listAllForTreasuryFiltered — export PDF
+     * (toutes les contributions correspondant aux filtres, sans limite).
+     *
+     * @return \Illuminate\Support\Collection<int, Contribution>
+     */
+    public function listAllForTreasuryExport(User $authUser, array $filters = []): \Illuminate\Support\Collection
+    {
+        return $this->buildTreasuryQuery($authUser, $filters)
+            ->with(['user', 'evenement', 'groupe'])
+            ->orderByDesc('created_at')
+            ->get();
+    }
+
+    /**
+     * Requête de base partagée par listAllForTreasuryFiltered et
+     * listAllForTreasuryExport — mêmes filtres, même scope église, même
+     * statut "completed" (réservé au panel admin pour l'audit des autres
+     * statuts).
+     */
+    private function buildTreasuryQuery(User $authUser, array $filters = [])
+    {
+        $query = Contribution::query()->where('statut', Contribution::STATUT_COMPLETED);
 
         if (!$authUser->isAdmin()) {
             $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
@@ -386,7 +445,7 @@ class ContributionService
             $query->whereMonth('created_at', (int) $filters['month']);
         }
 
-        return $query->orderByDesc('created_at')->paginate($perPage);
+        return $query;
     }
 
     /**
@@ -396,48 +455,31 @@ class ContributionService
      * Retourne :
      *   - total_paye  : SUM(montantTotal) — ce que les contributeurs ont effectivement payé
      *   - total_frais : SUM(frais)        — frais prélevés sur les transactions
-     *   - net_recu    : SUM(montant)      — montant net revenant à l'église
-     *   - count       : nombre de contributions correspondant aux filtres
+     *   - net_recu             : SUM(montant)      — montant net revenant à l'église
+     *   - nombre_contributeurs : COUNT(DISTINCT userId) — contributeurs uniques
      *
+     * Règle de comptage : un même utilisateur qui contribue N fois = 1 contributeur.
+     * Si filtre groupe actif : compté 1 fois par groupe distinct (naturel via WHERE).
      * Formule vérifiable : total_paye = net_recu + total_frais.
      */
     public function getTreasuryStats(User $authUser, array $filters = []): array
     {
-        $query = Contribution::query()
-            ->where('statut', Contribution::STATUT_COMPLETED);
-
-        if (!$authUser->isAdmin()) {
-            $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
-        }
-
-        if (!empty($filters['event_id'])) {
-            $query->where('evenementId', (int) $filters['event_id']);
-        }
-
-        if (!empty($filters['group_id'])) {
-            $query->where('groupeId', (int) $filters['group_id']);
-        }
-
-        if (!empty($filters['year'])) {
-            $query->whereYear('created_at', (int) $filters['year']);
-        }
-
-        if (!empty($filters['month'])) {
-            $query->whereMonth('created_at', (int) $filters['month']);
-        }
-
-        $result = $query->selectRaw(
-            'COALESCE(SUM(montantTotal), 0) as total_paye,
-             COALESCE(SUM(frais), 0)        as total_frais,
-             COALESCE(SUM(montant), 0)      as net_recu,
-             COUNT(*)                        as count'
+        $montantTotalCol = DbCompat::quoteColumn('montantTotal');
+        $userIdCol = DbCompat::quoteColumn('userId');
+        $result = $this->buildTreasuryQuery($authUser, $filters)->selectRaw(
+            "COALESCE(SUM($montantTotalCol), 0)   as total_paye,
+             COALESCE(SUM(frais), 0)           as total_frais,
+             COALESCE(SUM(montant), 0)         as net_recu,
+             COUNT(*)                           as count,
+             COUNT(DISTINCT $userIdCol)             as nombre_contributeurs"
         )->first();
 
         return [
-            'total_paye'  => (int) ($result->total_paye ?? 0),
-            'total_frais' => (int) ($result->total_frais ?? 0),
-            'net_recu'    => (int) ($result->net_recu ?? 0),
-            'count'       => (int) ($result->count ?? 0),
+            'total_paye'           => (int) ($result->total_paye ?? 0),
+            'total_frais'          => (int) ($result->total_frais ?? 0),
+            'net_recu'             => (int) ($result->net_recu ?? 0),
+            'count'                => (int) ($result->count ?? 0),
+            'nombre_contributeurs' => (int) ($result->nombre_contributeurs ?? 0),
         ];
     }
 

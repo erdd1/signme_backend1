@@ -8,6 +8,7 @@ use App\Models\Quartier;
 use App\Models\User;
 use App\Models\Ville;
 use App\Core\Exceptions\ApiException;
+use App\Core\Helpers\DbCompat;
 use App\Core\Services\CloudinaryService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -70,10 +71,12 @@ class UserService
 
         if (!empty($filters['search'])) {
             $search = '%' . $filters['search'] . '%';
-            $query->where(function ($q) use ($search) {
-                $q->where('nom', 'like', $search)
-                  ->orWhere('email', 'like', $search)
-                  ->orWhere('telephone', 'like', $search);
+            $like = DbCompat::likeOperator();
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('nom', $like, $search)
+                  ->orWhere('email', $like, $search)
+                  ->orWhere('telephone', $like, $search)
+                  ->orWhere('matricule', $like, $search);
             });
         }
 
@@ -138,39 +141,56 @@ class UserService
             );
         }
         $this->assertGroupePrincipalCoherent($groupeIds, $groupePrincipalId);
+        $this->assertMatriculeValidForChurch($churchId, $data['matricule'] ?? null, $data['sexe'] ?? null);
+        $estCommuniant = $this->resolveCommuniantForCreate($data['role'], $data);
 
-        $user = DB::transaction(function () use ($data, $churchId, $groupeIds, $groupePrincipalId) {
-            // 'role' est NOT NULL sans défaut en base : il doit être posé
-            // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
-            $user = new User([
-                'nom'                 => $data['nom'],
-                'email'               => $data['email'],
-                'password'            => $data['password'] ?? 'EEC@' . rand(10000, 99999),
-                'churchId'            => $churchId,
-                'telephone'           => $data['telephone'] ?? null,
-                'profession'          => $data['profession'] ?? null,
-                'originaireDe'        => $data['originaireDe'] ?? null,
-                'dateConfirmation'    => $data['dateConfirmation'] ?? null,
-                'lieuConfirmation'    => $data['lieuConfirmation'] ?? null,
-                'sexe'                => $data['sexe'] ?? null,
-                'dateNaissance'       => $data['dateNaissance'] ?? null,
-                'quartierResidenceId' => $data['quartierId'] ?? null,
-                'villeResidenceId'    => $data['villeId'] ?? null,
-                'groupePrincipalId'   => $groupePrincipalId,
-            ]);
+        // La vérification ci-dessus (exists()) n'est pas atomique : sous une
+        // course très rare (deux créations quasi simultanées avec le même
+        // email), c'est la contrainte UNIQUE en base (migration users.email)
+        // qui garantit qu'aucun doublon n'est JAMAIS réellement inséré — on
+        // se contente ici de transformer cette violation en message propre
+        // au lieu de laisser remonter une erreur 500 brute.
+        try {
+            $user = DB::transaction(function () use ($data, $churchId, $groupeIds, $groupePrincipalId, $estCommuniant) {
+                // 'role' est NOT NULL sans défaut en base : il doit être posé
+                // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
+                $user = new User([
+                    'nom'                 => $data['nom'],
+                    'email'               => $data['email'],
+                    'password'            => $data['password'] ?? 'EEC@' . rand(10000, 99999),
+                    'churchId'            => $churchId,
+                    'telephone'           => $data['telephone'] ?? null,
+                    'profession'          => $data['profession'] ?? null,
+                    'originaireDe'        => $data['originaireDe'] ?? null,
+                    'dateConfirmation'    => $data['dateConfirmation'] ?? null,
+                    'lieuConfirmation'    => $data['lieuConfirmation'] ?? null,
+                    'sexe'                => $data['sexe'] ?? null,
+                    'matricule'           => $churchId ? ($data['matricule'] ?? null) : null,
+                    'dateNaissance'       => $data['dateNaissance'] ?? null,
+                    'quartierResidenceId' => $data['quartierId'] ?? null,
+                    'villeResidenceId'    => $data['villeId'] ?? null,
+                    'groupePrincipalId'   => $groupePrincipalId,
+                ]);
 
-            // Champs sensibles : assignation explicite (non mass-assignable).
-            $user->role = $data['role'];
-            $user->actif = true;
-            $user->est_de_service = false;
-            $user->save();
+                // Champs sensibles : assignation explicite (non mass-assignable).
+                $user->role = $data['role'];
+                $user->actif = true;
+                $user->est_de_service = false;
+                $user->estCommuniant = $estCommuniant;
+                $user->save();
 
-            if (!empty($groupeIds)) {
-                $user->groupes()->sync($groupeIds);
+                if (!empty($groupeIds)) {
+                    $user->groupes()->sync($groupeIds);
+                }
+
+                return $user;
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ((int) $e->getCode() === 23000) {
+                throw ApiException::conflict("Un compte avec l'email \"{$data['email']}\" existe déjà.");
             }
-
-            return $user;
-        });
+            throw $e;
+        }
 
         // ─── Si c'est un pasteur, lier à l'église ─────────────────────────────
         if ($user->role === User::ROLE_PASTEUR && $churchId) {
@@ -272,6 +292,12 @@ class UserService
             }
         }
 
+        if (array_key_exists('matricule', $data)) {
+            $effectiveSexe = array_key_exists('sexe', $data) ? $data['sexe'] : $user->sexe;
+            $this->assertMatriculeValidForChurch($churchId, $data['matricule'], $effectiveSexe, $user->id);
+            $updateData['matricule'] = $data['matricule'];
+        }
+
         if (array_key_exists('groupePrincipalId', $data) || $groupeIds !== null) {
             $updateData['groupePrincipalId'] = $groupePrincipalId;
         }
@@ -282,20 +308,47 @@ class UserService
         }
 
         $newRole = $data['role'] ?? null;
+        $effectiveRole = $newRole ?? $user->role;
+        [$resolvedEstCommuniant, $resolvedCommuniantDepuis, $communiantChanged] =
+            $this->resolveCommuniantForUpdate($user, $data, $effectiveRole);
 
-        DB::transaction(function () use ($user, $updateData, $groupeIds, $newRole) {
-            $user->update($updateData);
+        // Comme create() : la contrainte UNIQUE en base (users.email) reste
+        // la garantie ultime contre un doublon sous une course rare — on
+        // transforme juste sa violation en message propre.
+        try {
+            DB::transaction(function () use (
+                $user,
+                $updateData,
+                $groupeIds,
+                $newRole,
+                $resolvedEstCommuniant,
+                $resolvedCommuniantDepuis,
+                $communiantChanged
+            ) {
+                $user->update($updateData);
 
-            // Champ sensible : assignation explicite (non mass-assignable).
-            if ($newRole !== null) {
-                $user->role = $newRole;
-                $user->save();
+                // Champs sensibles : assignation explicite (non mass-assignable).
+                if ($newRole !== null) {
+                    $user->role = $newRole;
+                    $user->save();
+                }
+
+                if ($communiantChanged) {
+                    $user->estCommuniant = $resolvedEstCommuniant;
+                    $user->communiantDepuis = $resolvedCommuniantDepuis;
+                    $user->save();
+                }
+
+                if ($groupeIds !== null) {
+                    $user->groupes()->sync($groupeIds);
+                }
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ((int) $e->getCode() === 23000) {
+                throw ApiException::conflict("Un compte avec cet email existe déjà.");
             }
-
-            if ($groupeIds !== null) {
-                $user->groupes()->sync($groupeIds);
-            }
-        });
+            throw $e;
+        }
 
         return $user->fresh(self::RELATIONS);
     }
@@ -447,6 +500,32 @@ class UserService
         });
     }
 
+    /**
+     * Calcule le prochain identifiant disponible (H001-H999 / F001-F999)
+     * pour une église et un sexe donnés — utilisé par le mode "génération
+     * automatique" du formulaire de création de membre.
+     *
+     * @throws ApiException
+     */
+    public function nextAvailableMatricule(User $authUser, ?int $churchId, string $sexe): string
+    {
+        $targetChurchId = $this->resolveChurchIdOrDefault($authUser, $churchId);
+        $prefix = $sexe === User::SEXE_FEMME ? 'F' : 'H';
+
+        $max = User::where('churchId', $targetChurchId)
+            ->where('matricule', 'like', $prefix . '___')
+            ->pluck('matricule')
+            ->map(fn ($m) => (int) substr($m, 1))
+            ->max() ?? 0;
+
+        $next = $max + 1;
+        if ($next > 999) {
+            throw ApiException::badRequest("Limite de 999 identifiants \"{$prefix}\" atteinte pour cette église.");
+        }
+
+        return $prefix . str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+    }
+
     // ─── Helpers privés ───────────────────────────────────────────────────────
 
     private function assertCanCreateRole(User $authUser, string $role): void
@@ -535,6 +614,104 @@ class UserService
         if (empty($groupeIds) || !in_array($groupePrincipalId, $groupeIds, true)) {
             throw ApiException::badRequest('Le groupe principal doit faire partie des groupes sélectionnés.');
         }
+    }
+
+    /**
+     * Vérifie l'identifiant propre à l'église (matricule) : obligatoire dès
+     * qu'un membre est rattaché à une église, cohérent avec le sexe (préfixe
+     * H/F) et unique au sein de cette église (deux églises différentes
+     * peuvent réutiliser le même matricule sans conflit).
+     *
+     * @throws ApiException
+     */
+    private function assertMatriculeValidForChurch(
+        ?int $churchId,
+        ?string $matricule,
+        ?string $sexe,
+        ?int $excludeUserId = null
+    ): void {
+        if ($churchId === null) {
+            return;
+        }
+
+        if (empty($matricule)) {
+            throw ApiException::badRequest('L\'identifiant est obligatoire.');
+        }
+
+        if (!preg_match(User::MATRICULE_REGEX, $matricule)) {
+            throw ApiException::badRequest('Format d\'identifiant invalide. Attendu : H001-H999 ou F001-F999.');
+        }
+
+        $expectedPrefix = $sexe === User::SEXE_FEMME ? 'F' : 'H';
+        if ($sexe && $matricule[0] !== $expectedPrefix) {
+            throw ApiException::badRequest('L\'identifiant ne correspond pas au sexe sélectionné.');
+        }
+
+        $query = User::where('churchId', $churchId)->where('matricule', $matricule);
+        if ($excludeUserId) {
+            $query->where('id', '!=', $excludeUserId);
+        }
+        if ($query->exists()) {
+            throw ApiException::conflict("L'identifiant \"{$matricule}\" est déjà utilisé dans cette église.");
+        }
+    }
+
+    /**
+     * Détermine le statut communiant à la création : obligatoire (et choisi
+     * librement) pour un paroissien, forcé à `true` pour tout autre rôle —
+     * les autres rôles sont et seront toujours communiants.
+     *
+     * @throws ApiException
+     */
+    private function resolveCommuniantForCreate(string $role, array $data): bool
+    {
+        if ($role !== User::ROLE_PAROISSIEN) {
+            return true;
+        }
+
+        if (!array_key_exists('estCommuniant', $data) || $data['estCommuniant'] === null) {
+            throw ApiException::badRequest(
+                'Le statut communiant/non communiant est obligatoire pour un paroissien.'
+            );
+        }
+
+        return (bool) $data['estCommuniant'];
+    }
+
+    /**
+     * Détermine le statut communiant à la mise à jour :
+     * - Rôle effectif ≠ paroissien : forcé à `true` (valeur cliente
+     *   ignorée), `communiantDepuis` réinitialisé — les autres rôles sont
+     *   et seront toujours communiants.
+     * - Rôle effectif = paroissien et `estCommuniant` non fourni : inchangé.
+     * - Rôle effectif = paroissien et valeur fournie : appliquée. Un
+     *   passage false→true pose `communiantDepuis` au 1er du mois courant
+     *   (plancher pour signer, jamais de rattrapage sur les mois où il
+     *   n'était pas communiant) ; un passage true→false l'efface (sera
+     *   reposé au prochain déblocage).
+     *
+     * @return array{0: bool, 1: ?string, 2: bool} [estCommuniant, communiantDepuis, changed]
+     */
+    private function resolveCommuniantForUpdate(User $user, array $data, string $effectiveRole): array
+    {
+        if ($effectiveRole !== User::ROLE_PAROISSIEN) {
+            $alreadyDefault = $user->estCommuniant && $user->communiantDepuis === null;
+            return [true, null, !$alreadyDefault];
+        }
+
+        if (!array_key_exists('estCommuniant', $data) || $data['estCommuniant'] === null) {
+            return [$user->estCommuniant, $user->communiantDepuis?->toDateString(), false];
+        }
+
+        $newValue = (bool) $data['estCommuniant'];
+
+        if ($newValue === $user->estCommuniant) {
+            return [$newValue, $user->communiantDepuis?->toDateString(), false];
+        }
+
+        $communiantDepuis = $newValue ? now()->startOfMonth()->toDateString() : null;
+
+        return [$newValue, $communiantDepuis, true];
     }
 
     /**

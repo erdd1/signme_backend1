@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\AncienDesignation;
 use App\Models\PaymentEvent;
 use App\Models\PaymentTransaction;
+use App\Core\Helpers\DbCompat;
 use App\Core\Helpers\FeeCalculator;
 use App\Core\Exceptions\ApiException;
 use App\Core\Services\PaymentQueueHealthService;
@@ -69,6 +70,10 @@ class SignatureService
         // serveur ne peut plus suivre sa confirmation (échec silencieux).
         $this->paymentQueueHealthService->ensureAvailable();
 
+        if (!$paroissien->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+        }
+
         $months        = $data['months'];      // ['2026-01', '2026-02', ...]
         $amount        = (int) $data['amount'];
         $paymentMethod = $data['paymentMethod']; // mobile_money | card
@@ -92,7 +97,7 @@ class SignatureService
         // ✅ Pas de mois futur
         // ✅ Le mois n'est PAS déjà signé (status = 'completed')
         Log::info("Début de validation des mois");
-        $this->validateMonths($paroissien->id, $months);
+        $this->validateMonths($paroissien, $months);
         Log::info("✅ Validation des mois réussie - Aucun doublon détecté");
 
         // ─── 2. Calcul des frais ───────────────────────────────────────────
@@ -338,11 +343,15 @@ class SignatureService
             throw ApiException::forbidden('Ce paroissien n\'appartient pas à votre église.');
         }
 
+        if (!$paroissien->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+        }
+
         $months = $data['months'];
         $amount = (int) $data['amount'];
 
         // Valider les mois (non déjà signés — pas de restriction sur les mois passés pour rattrapage)
-        $this->validateMonths($paroissien->id, $months, allowFuture: false);
+        $this->validateMonths($paroissien, $months, allowFuture: false);
 
         // Si le signataire est un ancien (non pasteur/admin), appliquer les règles de disponibilité
         if ($signateur->role === User::ROLE_ANCIEN && !$signateur->isAdmin()) {
@@ -744,21 +753,28 @@ class SignatureService
     /**
      * Retourne la carte d'un paroissien (toutes ses signatures par année).
      *
-     * @param int $userId  ID du paroissien
-     * @param int $year    Année (défaut : année en cours)
+     * @param User $authUser  Utilisateur connecté
+     * @param int  $year      Année (défaut : année en cours)
      * @return array
+     * @throws ApiException
      */
-    public function getMaCarte(int $userId, int $year): array
+    public function getMaCarte(User $authUser, int $year): array
     {
+        if (!$authUser->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+        }
+
+        $userId = $authUser->id;
         $cacheKey = "signatures:ma-carte:{$userId}:{$year}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(2), function () use ($userId, $year) {
-            return $this->buildMaCarte($userId, $year);
+        return Cache::remember($cacheKey, now()->addMinutes(2), function () use ($authUser, $year) {
+            return $this->buildMaCarte($authUser, $year);
         });
     }
 
-    private function buildMaCarte(int $userId, int $year): array
+    private function buildMaCarte(User $authUser, int $year): array
     {
+        $userId = $authUser->id;
         $signatures = Signature::where('userId', $userId)
                                ->where('year', $year)
                                ->where('status', 'completed')
@@ -800,7 +816,7 @@ class SignatureService
             'total_signe'       => $signatures->count(),
             'montant_total'     => $total,
             'signe_ce_mois'     => $signedThisMonth,
-            'mois_disponibles'  => $this->getAvailableMonths($userId, $year),
+            'mois_disponibles'  => $this->getAvailableMonths($userId, $year, $authUser->communiantDepuis?->format('Y-m')),
         ];
     }
 
@@ -828,7 +844,7 @@ class SignatureService
             $query->where('signatureType', $filters['type']);
         }
         if (!empty($filters['search'])) {
-            $query->where('nomParoissien', 'like', '%' . $filters['search'] . '%');
+            $query->where('nomParoissien', DbCompat::likeOperator(), '%' . $filters['search'] . '%');
         }
         if (!empty($filters['status'])) {
             $query->where('status', $filters['status']);
@@ -921,6 +937,10 @@ class SignatureService
      */
     public function getHistoriquePersonnel(User $authUser, array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
+        if (!$authUser->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+        }
+
         $query = Signature::where('userId', $authUser->id)
                           ->where('signatureType', 'distance')
                           ->orderBy('created_at', 'desc');
@@ -956,6 +976,10 @@ class SignatureService
      */
     public function getHistoriquePersonnelPresentiel(User $authUser, array $filters = [], int $perPage = 20): LengthAwarePaginator
     {
+        if (!$authUser->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+        }
+
         $query = Signature::where('userId', $authUser->id)
                           ->where('signatureType', 'presentiel')
                           ->with('ancien') // Charger le rôle du signataire
@@ -1037,11 +1061,15 @@ class SignatureService
     /**
      * Valide une liste de mois (format YYYY-MM).
      *
-     * @throws ApiException si : mois futur, doublon en BDD, doublon dans la requête
+     * @throws ApiException si : mois futur, doublon en BDD, doublon dans la requête,
+     *                       ou antérieur à `communiantDepuis` (paroissien redevenu
+     *                       communiant : pas de rattrapage sur les mois bloqués)
      */
-    private function validateMonths(int $userId, array $months, bool $allowFuture = false): void
+    private function validateMonths(User $user, array $months, bool $allowFuture = false): void
     {
+        $userId = $user->id;
         $currentMonth = now()->format('Y-m');
+        $communiantDepuisMonth = $user->communiantDepuis?->format('Y-m');
 
         // Pas de doublons dans la requête elle-même
         if (count($months) !== count(array_unique($months))) {
@@ -1058,6 +1086,14 @@ class SignatureService
             if (!$allowFuture && $monthKey > $currentMonth) {
                 throw ApiException::badRequest(
                     "Impossible de signer pour un mois futur ({$monthKey})."
+                );
+            }
+
+            // ─── Plancher communiant : jamais de signature avant le mois où le
+            // paroissien est redevenu communiant (pas de rattrapage rétroactif).
+            if ($communiantDepuisMonth !== null && $monthKey < $communiantDepuisMonth) {
+                throw ApiException::badRequest(
+                    "Communiant depuis {$communiantDepuisMonth} : impossible de signer pour un mois antérieur ({$monthKey})."
                 );
             }
 
@@ -1092,7 +1128,7 @@ class SignatureService
     /**
      * Retourne les mois disponibles (non encore signés) pour une année.
      */
-    private function getAvailableMonths(int $userId, int $year): array
+    private function getAvailableMonths(int $userId, int $year, ?string $communiantDepuisMonth = null): array
     {
         $signed = Signature::where('userId', $userId)
                            ->where('year', $year)
@@ -1105,7 +1141,8 @@ class SignatureService
 
         for ($m = 1; $m <= 12; $m++) {
             $monthKey = $year . '-' . str_pad($m, 2, '0', STR_PAD_LEFT);
-            if (!in_array($monthKey, $signed, true) && $monthKey <= $currentMonth) {
+            $afterCommuniantFloor = $communiantDepuisMonth === null || $monthKey >= $communiantDepuisMonth;
+            if (!in_array($monthKey, $signed, true) && $monthKey <= $currentMonth && $afterCommuniantFloor) {
                 $available[] = $monthKey;
             }
         }

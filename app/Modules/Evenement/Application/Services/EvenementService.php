@@ -3,6 +3,7 @@
 namespace App\Modules\Evenement\Application\Services;
 
 use App\Core\Exceptions\ApiException;
+use App\Core\Helpers\DbCompat;
 use App\Core\Services\CloudinaryService;
 use App\Models\Evenement;
 use App\Models\EvenementStateTransition;
@@ -83,7 +84,7 @@ class EvenementService
         $query = Evenement::query()
             ->with(['auteur', 'church'])
             ->selectSub(
-                \App\Models\Contribution::selectRaw('COUNT(DISTINCT userId)')
+                \App\Models\Contribution::selectRaw('COUNT(DISTINCT ' . DbCompat::quoteColumn('userId') . ')')
                     ->whereColumn('evenementId', 'evenements.id')
                     ->where('statut', \App\Models\Contribution::STATUT_COMPLETED),
                 'nombreContributeurs'
@@ -111,6 +112,14 @@ class EvenementService
 
     public function findByUuid(User $authUser, string $uuid): Evenement
     {
+        // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
+        // lève une erreur SQL pour une valeur mal formée, ce qui marque
+        // toute la transaction en cours comme invalide — voir le
+        // commentaire équivalent dans SortieFinanciereService::findByUuid().
+        if (!Str::isUuid($uuid)) {
+            throw ApiException::notFound('Evenement');
+        }
+
         $evenement = Evenement::where('uuid', $uuid)->with(['auteur', 'church'])->first();
 
         if (!$evenement) {
