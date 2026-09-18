@@ -2,7 +2,9 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use App\Core\Services\SystemHealthService;
 use App\Jobs\RetireAnciensDeServiceExpires;
+use App\Models\Backup;
 use App\Modules\Evenement\Application\Jobs\PublishScheduledEvenementsJob;
 use App\Modules\Evenement\Application\Jobs\TerminateExpiredEvenementsJob;
 use App\Modules\Evenement\Application\Jobs\ArchiveExpiredEvenementsJob;
@@ -10,6 +12,7 @@ use App\Modules\Evenement\Application\Jobs\ExpireStaleContributionsJob;
 use App\Modules\Payment\Application\Jobs\ExpireStalePaymentTransactionsJob;
 use App\Modules\Payment\Application\Jobs\PurgeOldPaymentSyncLogsJob;
 use App\Modules\Push\Application\Jobs\SendBirthdayPushesJob;
+use App\Modules\System\Application\Jobs\RunDatabaseBackupJob;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -30,6 +33,7 @@ Artisan::command('inspire', function () {
     ->daily()
     ->at('01:00') // Exécuté chaque jour à 01:00 du matin
     ->name('retire-anciens-de-service-expires')
+    ->after(fn () => SystemHealthService::recordHeartbeat('retire-anciens-de-service-expires'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error(
             'Job RetireAnciensDeServiceExpires a échoué'
@@ -44,6 +48,7 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new PublishScheduledEvenementsJob())
     ->everyMinute()
     ->name('publish-scheduled-evenements')
+    ->after(fn () => SystemHealthService::recordHeartbeat('publish-scheduled-evenements'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job PublishScheduledEvenementsJob a échoué');
     });
@@ -51,6 +56,7 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new TerminateExpiredEvenementsJob())
     ->everyMinute()
     ->name('terminate-expired-evenements')
+    ->after(fn () => SystemHealthService::recordHeartbeat('terminate-expired-evenements'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job TerminateExpiredEvenementsJob a échoué');
     });
@@ -58,6 +64,7 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new ArchiveExpiredEvenementsJob())
     ->hourly()
     ->name('archive-expired-evenements')
+    ->after(fn () => SystemHealthService::recordHeartbeat('archive-expired-evenements'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job ArchiveExpiredEvenementsJob a échoué');
     });
@@ -74,6 +81,7 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new ExpireStalePaymentTransactionsJob())
     ->everyFiveMinutes()
     ->name('expire-stale-payment-transactions')
+    ->after(fn () => SystemHealthService::recordHeartbeat('expire-stale-payment-transactions'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job ExpireStalePaymentTransactionsJob a échoué');
     });
@@ -81,6 +89,7 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new ExpireStaleContributionsJob())
     ->everyFiveMinutes()
     ->name('expire-stale-contributions')
+    ->after(fn () => SystemHealthService::recordHeartbeat('expire-stale-contributions'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job ExpireStaleContributionsJob a échoué');
     });
@@ -95,6 +104,7 @@ Artisan::command('inspire', function () {
     ->daily()
     ->at('02:00')
     ->name('purge-old-payment-sync-logs')
+    ->after(fn () => SystemHealthService::recordHeartbeat('purge-old-payment-sync-logs'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job PurgeOldPaymentSyncLogsJob a échoué');
     });
@@ -107,7 +117,22 @@ Artisan::command('inspire', function () {
 \Illuminate\Support\Facades\Schedule::job(new SendBirthdayPushesJob())
     ->everyFifteenMinutes()
     ->name('send-birthday-pushes')
+    ->after(fn () => SystemHealthService::recordHeartbeat('send-birthday-pushes'))
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('Job SendBirthdayPushesJob a échoué');
+    });
+
+/*
+|─────────────────────────────────────────────────────────────────────────────
+| Scheduler — Sauvegarde automatique de la base de données (locale + hors-site)
+|─────────────────────────────────────────────────────────────────────────────
+*/
+\Illuminate\Support\Facades\Schedule::job(new RunDatabaseBackupJob(Backup::TYPE_SCHEDULED))
+    ->daily()
+    ->at('02:30')
+    ->name('backup-database')
+    ->after(fn () => SystemHealthService::recordHeartbeat('backup-database'))
+    ->onFailure(function () {
+        \Illuminate\Support\Facades\Log::error('Job RunDatabaseBackupJob (sauvegarde planifiée) a échoué');
     });
 

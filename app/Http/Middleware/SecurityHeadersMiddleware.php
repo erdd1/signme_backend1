@@ -23,17 +23,22 @@ class SecurityHeadersMiddleware
     {
         $response = $next($request);
 
+        // headers->set() (et non ->header(), spécifique à Illuminate\Http\Response)
+        // fonctionne sur TOUS les types de réponse Symfony — y compris
+        // StreamedResponse/BinaryFileResponse (ex: téléchargement de sauvegarde),
+        // qui n'ont pas cette méthode de commodité Laravel.
+
         // ─── X-Frame-Options : Empêcher clickjacking ─────────────────────────
-        $response->header('X-Frame-Options', 'SAMEORIGIN');
+        $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
 
         // ─── X-Content-Type-Options : Prévenir MIME type sniffing ────────────
-        $response->header('X-Content-Type-Options', 'nosniff');
+        $response->headers->set('X-Content-Type-Options', 'nosniff');
 
         // ─── X-XSS-Protection : Activer le filtre XSS du navigateur ─────────
-        $response->header('X-XSS-Protection', '1; mode=block');
+        $response->headers->set('X-XSS-Protection', '1; mode=block');
 
         // ─── Referrer-Policy : Contrôler l'envoi du referrer ────────────────
-        $response->header('Referrer-Policy', 'strict-origin-when-cross-origin');
+        $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
         // ─── Content-Security-Policy : Contrôle strict du contenu ───────────
         $csp = implode('; ', [
@@ -47,12 +52,12 @@ class SecurityHeadersMiddleware
             "base-uri 'self'",                       // Restrict <base> tag
             "form-action 'self'",                    // Restrict form submissions
         ]);
-        $response->header('Content-Security-Policy', $csp);
+        $response->headers->set('Content-Security-Policy', $csp);
 
         // ─── HSTS : Force HTTPS (si activé) ────────────────────────────────
         if (config('security.https.hsts_enabled') && $request->secure()) {
             $maxAge = config('security.https.hsts_max_age', 31536000);
-            $response->header('Strict-Transport-Security', "max-age={$maxAge}; includeSubDomains");
+            $response->headers->set('Strict-Transport-Security', "max-age={$maxAge}; includeSubDomains");
         }
 
         // ─── Permissions-Policy : Contrôler l'accès aux features sensibles ──
@@ -63,10 +68,10 @@ class SecurityHeadersMiddleware
             "payment=()",                            // Pas d'accès Payment API
             "usb=()",                                // Pas d'accès USB
         ]);
-        $response->header('Permissions-Policy', $permissionsPolicy);
+        $response->headers->set('Permissions-Policy', $permissionsPolicy);
 
         // ─── X-Permitted-Cross-Domain-Policies : Flash/PDF ────────────────
-        $response->header('X-Permitted-Cross-Domain-Policies', 'none');
+        $response->headers->set('X-Permitted-Cross-Domain-Policies', 'none');
 
         // ─── Server header masking ─────────────────────────────────────────
         // Le header "Server" (nom/version du serveur web) n'est PAS masqué

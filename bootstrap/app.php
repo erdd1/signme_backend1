@@ -33,6 +33,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
         $middleware->append(\App\Http\Middleware\SecurityHeadersMiddleware::class);
 
+        // L'API admin reste joignable même en mode maintenance (activable
+        // depuis /api/admin/system/maintenance/enable) — sinon un admin qui
+        // active la maintenance perd aussitôt tout moyen de la désactiver
+        // depuis son propre dashboard.
+        \Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance::except([
+            'api/admin/*',
+        ]);
+
         // =====================================================================
         // Aliases des middlewares personnalisés (utilisables dans les routes)
         // =====================================================================

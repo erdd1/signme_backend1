@@ -23,6 +23,7 @@ use App\Modules\UserLookup\Http\QuartierController;
 use App\Modules\UserLookup\Http\VilleController;
 use App\Modules\Support\Http\SupportController;
 use App\Modules\Push\Http\DeviceTokenController;
+use App\Modules\System\Http\SystemController;
 
 /*
 |=============================================================================
@@ -594,6 +595,25 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
     // ADMIN SUPPORT (Contact service client)
     // =========================================================================
     Route::get('/support/whatsapp', [SupportController::class, 'whatsapp']);
+
+    // =========================================================================
+    // ADMIN SYSTEM (Maintenance production : santé, sauvegardes, mode maintenance)
+    // =========================================================================
+    Route::prefix('system')->group(function () {
+        Route::get('/health', [SystemController::class, 'health']);
+
+        Route::get('/backups', [SystemController::class, 'listBackups']);
+        Route::post('/backups', [SystemController::class, 'triggerBackup']);
+        Route::get('/backups/{uuid}/download', [SystemController::class, 'downloadBackup']);
+        Route::post('/backups/{uuid}/restore', [SystemController::class, 'restoreBackup']);
+
+        Route::get('/maintenance', [SystemController::class, 'maintenanceStatus']);
+        Route::post('/maintenance/enable', [SystemController::class, 'enableMaintenance']);
+        Route::post('/maintenance/disable', [SystemController::class, 'disableMaintenance']);
+
+        Route::get('/logs', [SystemController::class, 'logs']);
+        Route::get('/logs/download', [SystemController::class, 'downloadLog']);
+    });
 
     }); // fin mfa.enabled
 

@@ -56,6 +56,33 @@ return [
             'throw' => false,
         ],
 
+        // Copie locale des sauvegardes de base de données (rétention courte,
+        // restauration rapide). Le disque "backups" ci-dessous est la copie
+        // hors-site (S3-compatible) qui assure la survie des données même en
+        // cas de perte totale du serveur.
+        'backups-local' => [
+            'driver' => 'local',
+            'root' => storage_path('app/backups'),
+            'throw' => false,
+        ],
+
+        // Stockage hors-site des sauvegardes — compatible avec tout
+        // fournisseur S3 (AWS S3, Contabo Object Storage, Backblaze B2...)
+        // via `endpoint`/`use_path_style_endpoint`. Volontairement distinct
+        // du disque "s3" générique ci-dessus pour ne pas mélanger les
+        // identifiants des sauvegardes avec ceux d'un usage applicatif futur.
+        'backups' => [
+            'driver' => 's3',
+            'key' => env('BACKUP_S3_ACCESS_KEY_ID'),
+            'secret' => env('BACKUP_S3_SECRET_ACCESS_KEY'),
+            'region' => env('BACKUP_S3_DEFAULT_REGION', 'us-east-1'),
+            'bucket' => env('BACKUP_S3_BUCKET'),
+            'url' => env('BACKUP_S3_URL'),
+            'endpoint' => env('BACKUP_S3_ENDPOINT'),
+            'use_path_style_endpoint' => env('BACKUP_S3_USE_PATH_STYLE_ENDPOINT', true),
+            'throw' => false,
+        ],
+
     ],
 
     /*
