@@ -35,6 +35,9 @@ class UserResource extends JsonResource
 
             // ─── Démographie ────────────────────────────────────────────
             'sexe'               => $this->sexe,
+            'matricule'          => $this->matricule,
+            'estCommuniant'      => $this->estCommuniant,
+            'communiantDepuis'   => $this->communiantDepuis?->format('Y-m-d'),
             'dateNaissance'      => $this->dateNaissance?->format('Y-m-d'),
 
             'quartier' => $this->whenLoaded('quartier', fn () => $this->quartier ? [

@@ -68,6 +68,7 @@ public function test_administrator_cannot_login_on_mobile(): void
         'email' => 'admin@test.com',
         'password' => bcrypt('password123'),
         'role' => 'administrateur',
+        'is_super_admin' => true,
         'actif' => true,
     ]);
 

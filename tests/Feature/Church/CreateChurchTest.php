@@ -15,6 +15,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $token = $admin->createToken('test')->plainTextToken;
@@ -33,6 +34,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $token = $admin->createToken('test')->plainTextToken;
@@ -51,6 +53,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $token = $admin->createToken('test')->plainTextToken;
@@ -71,6 +74,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $token = $admin->createToken('test')->plainTextToken;
@@ -95,6 +99,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         Church::create([
@@ -119,6 +124,7 @@ class CreateChurchTest extends TestCase
     {
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         Church::create([

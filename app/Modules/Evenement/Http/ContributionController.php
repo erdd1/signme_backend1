@@ -9,6 +9,7 @@ use App\Models\Contribution;
 use App\Models\PaymentEvent;
 use App\Models\PaymentSyncLog;
 use App\Modules\Auth\Application\Services\RateLimitService;
+use App\Modules\Evenement\Application\Services\ContributionPdfExportService;
 use App\Modules\Evenement\Application\Services\ContributionService;
 use App\Modules\Evenement\Http\Requests\CreateContributionRequest;
 use App\Modules\Evenement\Http\Resources\ContributionDetailResource;
@@ -39,6 +40,7 @@ class ContributionController extends Controller
 
     public function __construct(
         private readonly ContributionService $contributionService,
+        private readonly ContributionPdfExportService $contributionPdfExportService,
         private readonly NotchPayGateway $notchPayGateway,
         private readonly PaymentReceiptService $paymentReceiptService,
         private readonly RateLimitService $rateLimitService,
@@ -135,6 +137,23 @@ class ContributionController extends Controller
         $events = $this->contributionService->getEvenementsAvecContributions($request->user());
 
         return $this->successResponse($events, 'Événements récupérés avec succès.');
+    }
+
+    /**
+     * GET /contributions-evenements/export-pdf
+     *
+     * Export PDF des contributions — pour un événement précis (event_id) ou
+     * toutes les événements confondus (statistiques globales). Réservé au
+     * pasteur et au trésorier (le secrétaire garde l'accès en lecture aux
+     * autres endpoints de ce tableau de bord, mais pas à cet export).
+     * Query: event_id, group_id, year, month (combinables)
+     */
+    public function exportPdf(Request $request)
+    {
+        $filters = $request->only(['event_id', 'group_id', 'year', 'month']);
+        $pdf = $this->contributionPdfExportService->generate($request->user(), $filters);
+
+        return $pdf->download('contributions-evenement-' . now()->format('Y-m-d') . '.pdf');
     }
 
 

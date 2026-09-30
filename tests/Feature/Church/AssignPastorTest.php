@@ -15,6 +15,7 @@ public function test_admin_can_assign_pastor(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $pastor = User::factory()->create([
@@ -39,6 +40,7 @@ public function test_assign_pastor_updates_church_pastor_id(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $pastor = User::factory()->create([
@@ -66,6 +68,7 @@ public function test_assign_pastor_updates_church_pastor_name(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $pastor = User::factory()->create([
@@ -94,6 +97,7 @@ public function test_assign_pastor_updates_pastor_church(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $pastor = User::factory()->create([
@@ -122,6 +126,7 @@ public function test_pastor_id_is_required(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $token = $admin->createToken('test')->plainTextToken;
@@ -140,6 +145,7 @@ public function test_pastor_must_exist(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $token = $admin->createToken('test')->plainTextToken;
@@ -158,6 +164,7 @@ public function test_church_must_exist(): void
 {
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $pastor = User::factory()->create([
@@ -182,6 +189,7 @@ public function test_user_must_be_pastor(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $user = User::factory()->create([

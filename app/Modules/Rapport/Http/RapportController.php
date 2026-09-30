@@ -4,6 +4,7 @@ namespace App\Modules\Rapport\Http;
 
 use App\Http\Controllers\Controller;
 use App\Core\Traits\ApiResponseTrait;
+use App\Modules\Rapport\Application\Services\RapportPdfService;
 use App\Modules\Rapport\Application\Services\RapportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,8 @@ class RapportController extends Controller
     use ApiResponseTrait;
 
     public function __construct(
-        private readonly RapportService $rapportService
+        private readonly RapportService $rapportService,
+        private readonly RapportPdfService $rapportPdfService
     ) {}
 
     /**
@@ -47,6 +49,24 @@ class RapportController extends Controller
     }
 
     /**
+     * GET /api/v1/rapports/secretaire/pdf
+     *
+     * Export PDF du rapport secrétaire (qui a signé / qui n'a pas signé,
+     * montant collecté) — pasteur/secrétaire uniquement.
+     * Query: month (YYYY-MM requis)
+     */
+    public function secretairePdf(Request $request)
+    {
+        $request->validate([
+            'month' => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+        ]);
+
+        $pdf = $this->rapportPdfService->generateSecretairePdf($request->user(), $request->month);
+
+        return $pdf->download('rapport-secretaire-' . $request->month . '.pdf');
+    }
+
+    /**
      * GET /api/v1/rapports/finances/annuel
      *
      * Rapport financier annuel (12 mois + totaux).
@@ -68,6 +88,25 @@ class RapportController extends Controller
         );
 
         return $this->successResponse($data, 'Rapport financier annuel généré avec succès.');
+    }
+
+    /**
+     * GET /api/v1/rapports/finances/annuel/pdf
+     *
+     * Export PDF du rapport financier annuel (12 mois + totaux) —
+     * pasteur/trésorier uniquement.
+     * Query: year (défaut: année courante)
+     */
+    public function financesAnnuelPdf(Request $request)
+    {
+        $request->validate([
+            'year' => ['nullable', 'integer', 'min:2020', 'max:2099'],
+        ]);
+
+        $year = (int) $request->get('year', now()->year);
+        $pdf = $this->rapportPdfService->generateFinancesAnnuelPdf($request->user(), $year);
+
+        return $pdf->download('rapport-financier-' . $year . '.pdf');
     }
 
     /**

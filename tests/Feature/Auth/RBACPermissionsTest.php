@@ -18,6 +18,7 @@ class RBACPermissionsTest extends TestCase
             'email' => fake()->unique()->safeEmail(),
             'password' => 'password123',
             'role' => $role,
+            'estCommuniant' => true,
         ];
     }
 

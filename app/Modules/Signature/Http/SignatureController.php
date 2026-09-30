@@ -159,7 +159,7 @@ class SignatureController extends Controller
     public function maCarte(Request $request): JsonResponse
     {
         $year = (int) $request->get('year', now()->year);
-        $carte = $this->signatureService->getMaCarte($request->user()->id, $year);
+        $carte = $this->signatureService->getMaCarte($request->user(), $year);
 
         return $this->successResponse($carte, 'Carte récupérée avec succès.');
     }

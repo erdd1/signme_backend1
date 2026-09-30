@@ -23,6 +23,11 @@ use App\Modules\UserLookup\Http\QuartierController;
 use App\Modules\UserLookup\Http\VilleController;
 use App\Modules\Support\Http\SupportController;
 use App\Modules\Push\Http\DeviceTokenController;
+use App\Modules\Tresorerie\Http\SortieFinanciereController;
+use App\Modules\Retrait\Http\RetraitController;
+use App\Modules\AboutChurch\Http\AboutChurchController;
+use App\Modules\Celebration\Http\CelebrationController;
+use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
 use App\Modules\AdminAccess\Http\AdminAccessController;
 
@@ -158,7 +163,12 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         // Must be authenticated - checks if user is 'ancien de service' and within their designated hours
         Route::get('/can-sign-presentiel',  [UserController::class, 'canSignPresentielNow'])
              ->middleware('auth:sanctum');
-        
+
+        // Prochain identifiant (matricule) disponible pour un sexe donné —
+        // AVANT /{id} pour éviter le conflit de capture.
+        Route::get('/next-matricule', [UserController::class, 'nextMatricule'])
+             ->middleware('role:pasteur,secretaire');
+
         // Create new user (pasteur/secrétaire)
         Route::post('/',               [UserController::class, 'store'])
              ->middleware('role:pasteur,secretaire');
@@ -166,6 +176,11 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         // Tableau de bord "Gérer utilisateurs" (stats + filtres) — pasteur/secrétaire
         // AVANT /{id} pour éviter le conflit de capture.
         Route::get('/stats', [UserController::class, 'stats'])
+             ->middleware('role:pasteur,secretaire');
+
+        // Export PDF de la liste des membres — pasteur/secrétaire.
+        // AVANT /{id} pour éviter le conflit de capture.
+        Route::get('/export-pdf', [UserController::class, 'exportPdf'])
              ->middleware('role:pasteur,secretaire');
 
         Route::get('/{id}',            [UserController::class, 'show'])
@@ -250,6 +265,25 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     });
 
     // =========================================================================
+    // CLIENT ABOUT CHURCH ("À propos de mon Église")
+    // Lecture : tous les rôles. Écriture (infos + articles + épinglage) :
+    // pasteur/secrétaire uniquement — présentation collective de l'église,
+    // pas de restriction "auteur uniquement" contrairement aux Publications.
+    // =========================================================================
+    Route::prefix('about-church')->group(function () {
+        Route::get('/', [AboutChurchController::class, 'show']);
+
+        Route::middleware('role:pasteur,secretaire')->group(function () {
+            Route::put('/info',                    [AboutChurchController::class, 'updateInfo']);
+            Route::post('/articles',                [AboutChurchController::class, 'storeArticle']);
+            Route::put('/articles/{uuid}',          [AboutChurchController::class, 'updateArticle']);
+            Route::delete('/articles/{uuid}',       [AboutChurchController::class, 'destroyArticle']);
+            Route::post('/articles/{uuid}/pin',     [AboutChurchController::class, 'pinArticle']);
+            Route::post('/articles/{uuid}/unpin',   [AboutChurchController::class, 'unpinArticle']);
+        });
+    });
+
+    // =========================================================================
     // CLIENT EVENEMENTS (Module collecte de fonds — fil d'actualité)
     // =========================================================================
     Route::prefix('evenements')->group(function () {
@@ -287,10 +321,58 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // Onglet drawer "Contributions événement" - Pasteur/Secrétaire/Trésorier
     // ⚠ Les routes statiques /stats et /filters/events sont déclarées AVANT la
     // route de liste pour éviter tout conflit de capture par le routeur Laravel.
+    // Export PDF — pasteur/trésorier uniquement (pas le secrétaire, à la
+    // différence des routes de lecture ci-dessous). AVANT la route de liste
+    // pour éviter tout conflit de capture.
+    Route::get('/contributions-evenements/export-pdf', [ContributionController::class, 'exportPdf'])
+         ->middleware('role:pasteur,tresorier');
+
     Route::middleware('role:pasteur,secretaire,tresorier')->group(function () {
         Route::get('/contributions-evenements/stats',           [ContributionController::class, 'treasuryStats']);
         Route::get('/contributions-evenements/filters/events',  [ContributionController::class, 'filterEvents']);
         Route::get('/contributions-evenements',                 [ContributionController::class, 'allForTreasury']);
+    });
+
+    // =========================================================================
+    // CLIENT SORTIES FINANCIÈRES (Module trésorerie — Pasteur/Trésorier)
+    // =========================================================================
+    // ⚠ Route statiques avant les routes paramétrées — éviter conflits.
+    Route::middleware('role:pasteur,tresorier')->group(function () {
+        Route::prefix('sorties-financieres')->group(function () {
+            Route::get('/dashboard', [SortieFinanciereController::class, 'dashboard']);
+            Route::post('/simple',   [SortieFinanciereController::class, 'storeSimple']);
+            Route::post('/frais',    [SortieFinanciereController::class, 'storeFrais']);
+            Route::get('/',          [SortieFinanciereController::class, 'index']);
+            Route::put('/{uuid}',    [SortieFinanciereController::class, 'update']);
+            Route::delete('/{uuid}', [SortieFinanciereController::class, 'destroy']);
+        });
+    });
+
+    // =========================================================================
+    // CLIENT RETRAITS (Module retrait — Pasteur/Trésorier uniquement)
+    // =========================================================================
+    // ⚠ Routes statiques (/solde, /beneficiaire) AVANT /{uuid} pour éviter le
+    // conflit de capture.
+    Route::middleware('role:pasteur,tresorier')->group(function () {
+        Route::prefix('retraits')->group(function () {
+            Route::get('/solde',                  [RetraitController::class, 'solde']);
+            Route::get('/beneficiaire',           [RetraitController::class, 'showBeneficiaire']);
+            Route::post('/beneficiaire',          [RetraitController::class, 'storeBeneficiaire']);
+            Route::post('/',                      [RetraitController::class, 'store']);
+            Route::get('/',                       [RetraitController::class, 'index']);
+            Route::post('/{uuid}/recheck',        [RetraitController::class, 'recheck']);
+        });
+    });
+
+    // =========================================================================
+    // CLIENT CELEBRATIONS (Anniversaires + occasions — tous rôles)
+    // =========================================================================
+    // ⚠ Route statique /read après paramétrée /{uuid} car imbriquée dessous —
+    // pas de conflit ici, /{uuid} et /{uuid}/read ne se chevauchent pas.
+    Route::prefix('celebrations')->group(function () {
+        Route::get('/',            [CelebrationController::class, 'index']);
+        Route::get('/{uuid}',      [CelebrationController::class, 'show']);
+        Route::post('/{uuid}/read', [CelebrationController::class, 'markRead']);
     });
 
     // =========================================================================
@@ -318,10 +400,14 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     Route::get('/rapports/secretaire', [RapportController::class, 'secretaire'])
          ->middleware('role:pasteur,secretaire');
 
+    Route::get('/rapports/secretaire/pdf', [RapportController::class, 'secretairePdf'])
+         ->middleware('role:pasteur,secretaire');
+
     Route::prefix('rapports/finances')
          ->middleware('role:pasteur,tresorier')
          ->group(function () {
             Route::get('/annuel',    [RapportController::class, 'financesAnnuel']);
+            Route::get('/annuel/pdf', [RapportController::class, 'financesAnnuelPdf']);
             Route::get('/mois',      [RapportController::class, 'financesMois']);
          });
 
@@ -433,6 +519,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::post('/',        [UserController::class, 'store']);
         // AVANT /{id} pour éviter le conflit de capture.
         Route::get('/stats',    [UserController::class, 'stats']);
+        Route::get('/next-matricule', [UserController::class, 'nextMatricule']);
         Route::get('/{id}',     [UserController::class, 'show']);
         Route::put('/{id}',     [UserController::class, 'update']);
         Route::delete('/{id}',  [UserController::class, 'destroy']);
@@ -471,6 +558,19 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
         Route::put('/{id}',         [ChurchController::class, 'update']);
         Route::delete('/{id}',      [ChurchController::class, 'destroy']);
         Route::post('/{id}/pastor', [ChurchController::class, 'assignPastor']);
+    });
+
+    // =========================================================================
+    // ADMIN ABOUT CHURCH ("À propos de mon Église") — Full access, toutes églises
+    // =========================================================================
+    Route::prefix('about-church')->middleware('permission:about_church')->group(function () {
+        Route::get('/',                       [AboutChurchController::class, 'show']);
+        Route::put('/info',                   [AboutChurchController::class, 'updateInfo']);
+        Route::post('/articles',              [AboutChurchController::class, 'storeArticle']);
+        Route::put('/articles/{uuid}',        [AboutChurchController::class, 'updateArticle']);
+        Route::delete('/articles/{uuid}',     [AboutChurchController::class, 'destroyArticle']);
+        Route::post('/articles/{uuid}/pin',   [AboutChurchController::class, 'pinArticle']);
+        Route::post('/articles/{uuid}/unpin', [AboutChurchController::class, 'unpinArticle']);
     });
 
     // =========================================================================
@@ -560,6 +660,28 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'check.actif', 'role:adminis
             Route::post('/{uuid}/recheck',  [ContributionController::class, 'recheck']);
             Route::get('/{uuid}/receipt',   [ContributionController::class, 'receipt']);
         });
+    });
+
+    // =========================================================================
+    // ADMIN SORTIES FINANCIÈRES
+    // =========================================================================
+    Route::prefix('sorties-financieres')->middleware('permission:sorties_financieres')->group(function () {
+        Route::get('/pending',             [SortieFinanciereController::class, 'adminPending']);
+        Route::get('/',                    [SortieFinanciereController::class, 'adminIndex']);
+        Route::post('/{uuid}/approve',     [SortieFinanciereController::class, 'approve']);
+        Route::post('/{uuid}/reject',      [SortieFinanciereController::class, 'reject']);
+    });
+
+    // =========================================================================
+    // ADMIN CELEBRATIONS
+    // =========================================================================
+    Route::prefix('celebration-types')->middleware('permission:celebrations')->group(function () {
+        Route::get('/',      [CelebrationTypeController::class, 'index']);
+        Route::put('/{id}',  [CelebrationTypeController::class, 'update']);
+    });
+    Route::prefix('celebrations')->middleware('permission:celebrations')->group(function () {
+        Route::get('/',          [CelebrationController::class, 'adminIndex']);
+        Route::delete('/{uuid}', [CelebrationController::class, 'adminDestroy']);
     });
 
     // =========================================================================

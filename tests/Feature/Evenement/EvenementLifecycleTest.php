@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Evenement;
 
+use App\Core\Services\ImageStorageService;
 use App\Models\Church;
 use App\Models\Evenement;
 use App\Models\User;
@@ -9,6 +10,7 @@ use App\Modules\Evenement\Application\Jobs\ArchiveExpiredEvenementsJob;
 use App\Modules\Evenement\Application\Jobs\PublishScheduledEvenementsJob;
 use App\Modules\Evenement\Application\Jobs\TerminateExpiredEvenementsJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
@@ -324,6 +326,51 @@ class EvenementLifecycleTest extends TestCase
             ->assertStatus(200);
     }
 
+    /**
+     * Bonus de la migration Cloudinary → stockage local : sur disque local,
+     * une ancienne image jamais nettoyée est une fuite d'espace disque réelle
+     * (contrairement à Cloudinary, sans conséquence à leur échelle) — voir
+     * EvenementService::update().
+     */
+    public function test_update_with_new_image_deletes_previous_image(): void
+    {
+        $church = Church::factory()->create();
+        $auteur = $this->pasteur($church);
+
+        $this->mock(ImageStorageService::class, function ($mock) {
+            $mock->shouldReceive('generateEvenementFilename')->andReturn('evenement_new');
+            $mock->shouldReceive('uploadEvenementImage')
+                ->andReturn('https://api.test/storage/evenements/evenement_new.jpg');
+            $mock->shouldReceive('deleteByUrl')
+                ->once()
+                ->with('https://api.test/storage/evenements/evenement_old.jpg');
+        });
+
+        $evenement = Evenement::create([
+            'uuid'        => \Illuminate\Support\Str::uuid(),
+            'churchId'    => $church->id,
+            'auteurId'    => $auteur->id,
+            'titre'       => 'Excellence scolaire 2026',
+            'description' => str_repeat('a', 25),
+            'statut'      => Evenement::STATUT_ACTIF,
+            'dateDebut'   => now(),
+            'publishedAt' => now(),
+            'imageUrl'    => 'https://api.test/storage/evenements/evenement_old.jpg',
+        ]);
+
+        $this->asUser($auteur)
+            ->put("/api/v1/evenements/{$evenement->uuid}", [
+                'titre' => 'Titre modifie valide',
+                'image' => UploadedFile::fake()->image('nouvelle.jpg'),
+            ])
+            ->assertStatus(200);
+
+        $this->assertDatabaseHas('evenements', [
+            'uuid'     => $evenement->uuid,
+            'imageUrl' => 'https://api.test/storage/evenements/evenement_new.jpg',
+        ]);
+    }
+
     public function test_cannot_update_terminated_or_archived_evenement(): void
     {
         $church = Church::factory()->create();
@@ -507,7 +554,7 @@ class EvenementLifecycleTest extends TestCase
     {
         $church = Church::factory()->create();
         $auteur = $this->pasteur($church);
-        $admin = User::factory()->create(['role' => 'administrateur', 'churchId' => $church->id]);
+        $admin = User::factory()->create(['role' => 'administrateur', 'churchId' => $church->id, 'is_super_admin' => true]);
 
         $evenement = Evenement::create([
             'uuid'        => \Illuminate\Support\Str::uuid(),

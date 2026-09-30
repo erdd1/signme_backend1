@@ -53,6 +53,7 @@ class UpdatePublicationTest extends TestCase
 
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $author = User::factory()->create([

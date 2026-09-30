@@ -3,7 +3,7 @@
 namespace App\Modules\AboutChurch\Application\Services;
 
 use App\Core\Exceptions\ApiException;
-use App\Core\Services\CloudinaryService;
+use App\Core\Services\ImageStorageService;
 use App\Models\AboutChurchArticle;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -23,7 +23,7 @@ use Illuminate\Support\Str;
 class AboutChurchArticleService
 {
     public function __construct(
-        private readonly CloudinaryService $cloudinaryService,
+        private readonly ImageStorageService $imageStorageService,
     ) {}
 
     /**
@@ -74,11 +74,11 @@ class AboutChurchArticleService
                 'auteurNom'     => $authUser->nom,
             ]);
         } catch (\Throwable $e) {
-            // La création DB a échoué après un upload Cloudinary réussi :
-            // nettoyer les images déjà envoyées pour ne rien laisser
-            // d'orphelin sur Cloudinary.
+            // La création DB a échoué après un enregistrement réussi des
+            // images : les supprimer pour ne rien laisser d'orphelin sur le
+            // disque.
             foreach ($imageUrls as $url) {
-                $this->cloudinaryService->deleteByUrl($url);
+                $this->imageStorageService->deleteByUrl($url);
             }
             throw $e;
         }
@@ -131,16 +131,16 @@ class AboutChurchArticleService
 
         $article->save();
 
-        // Nettoyage Cloudinary des anciennes images retirées UNIQUEMENT
-        // après le succès de la sauvegarde, pour ne jamais perdre d'images
-        // si l'update échoue en cours de route. Ne supprime que celles qui
-        // ne font plus partie du jeu final (jamais celles conservées via
-        // keepImages, et jamais les nouvelles fraîchement uploadées — leur
-        // public_id est de toute façon distinct, voir
-        // CloudinaryService::generateAboutChurchArticlePublicId).
+        // Nettoyage des anciennes images retirées UNIQUEMENT après le succès
+        // de la sauvegarde, pour ne jamais perdre d'images si l'update échoue
+        // en cours de route. Ne supprime que celles qui ne font plus partie
+        // du jeu final (jamais celles conservées via keepImages, et jamais
+        // les nouvelles fraîchement enregistrées — leur nom de fichier est de
+        // toute façon distinct, voir
+        // ImageStorageService::generateAboutChurchArticleFilename).
         if ($finalImages !== null) {
             foreach (array_diff($oldImages, $finalImages) as $url) {
-                $this->cloudinaryService->deleteByUrl($url);
+                $this->imageStorageService->deleteByUrl($url);
             }
         }
 
@@ -153,7 +153,7 @@ class AboutChurchArticleService
         $this->assertCanManageArticle($authUser, $article);
 
         foreach ($article->images ?? [] as $url) {
-            $this->cloudinaryService->deleteByUrl($url);
+            $this->imageStorageService->deleteByUrl($url);
         }
 
         $article->delete();
@@ -248,18 +248,18 @@ class AboutChurchArticleService
 
     // ─── Helpers privés ─────────────────────────────────────────────────────
 
-    /** @return string[] URLs Cloudinary, dans l'ordre reçu */
+    /** @return string[] URLs des images enregistrées, dans l'ordre reçu */
     private function uploadImages(array $imageFiles, string $articleUuid): array
     {
         $urls = [];
         try {
             foreach (array_values($imageFiles) as $index => $file) {
-                $publicId = $this->cloudinaryService->generateAboutChurchArticlePublicId($articleUuid, $index);
-                $urls[] = $this->cloudinaryService->uploadAboutChurchArticleImage($file, $publicId);
+                $filename = $this->imageStorageService->generateAboutChurchArticleFilename($articleUuid, $index);
+                $urls[] = $this->imageStorageService->uploadAboutChurchArticleImage($file, $filename);
             }
         } catch (\Throwable $e) {
             foreach ($urls as $url) {
-                $this->cloudinaryService->deleteByUrl($url);
+                $this->imageStorageService->deleteByUrl($url);
             }
             throw $e;
         }

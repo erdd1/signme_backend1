@@ -146,6 +146,7 @@ class PresentielSignatureTest extends TestCase
 
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
         ]);
 
         $user = User::factory()->create([
@@ -304,6 +305,7 @@ class PresentielSignatureTest extends TestCase
 
         $admin = User::factory()->create([
             'role' => 'administrateur',
+            'is_super_admin' => true,
             'churchId' => $church1->id,
         ]);
 

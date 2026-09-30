@@ -18,6 +18,7 @@ public function test_admin_can_disable_user(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $user = User::factory()->create([
@@ -47,6 +48,7 @@ public function test_admin_can_enable_user(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $user = User::factory()->create([
@@ -81,6 +83,7 @@ public function test_pasteur_cannot_disable_admin(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $token = $pasteur->createToken('test')->plainTextToken;
@@ -99,6 +102,7 @@ public function test_disabling_user_revokes_all_access_tokens(): void
 
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $user = User::factory()->create([
@@ -157,6 +161,7 @@ public function test_admin_cannot_disable_himself(): void
 {
     $admin = User::factory()->create([
         'role' => 'administrateur',
+        'is_super_admin' => true,
         'actif' => true,
     ]);
 

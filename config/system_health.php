@@ -23,7 +23,7 @@ return [
         'expire-stale-payment-transactions' => ['label' => 'Expiration des paiements bloqués (signatures)', 'max_interval_minutes' => 15],
         'expire-stale-contributions' => ['label' => 'Expiration des contributions bloquées', 'max_interval_minutes' => 15],
         'purge-old-payment-sync-logs' => ['label' => 'Purge des logs techniques de paiement', 'max_interval_minutes' => 26 * 60],
-        'send-birthday-pushes' => ['label' => "Envoi des notifications d'anniversaire", 'max_interval_minutes' => 30],
+        'send-celebration-pushes' => ['label' => 'Envoi des notifications de célébrations', 'max_interval_minutes' => 30],
         'backup-database' => ['label' => 'Sauvegarde automatique de la base de données', 'max_interval_minutes' => 26 * 60],
     ],
 

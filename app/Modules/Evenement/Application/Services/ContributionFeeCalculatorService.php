@@ -28,23 +28,11 @@ class ContributionFeeCalculatorService
     public const MONTANT_MAX = 1_000_000;
     public const MULTIPLE_DE = 50;
 
-    // TODO(TEST TEMPORAIRE) : montant de 15 FCFA (frais 5 FCFA) ajouté
-    // uniquement pour tester le flux de paiement CamPay sans débiter de
-    // grosses sommes. À SUPPRIMER avant mise en production définitive —
-    // supprimer cette constante ainsi que les 2 blocs marqués
-    // "TODO(TEST TEMPORAIRE)" dans isValidAmount() et calculate() ci-dessous.
-    private const MONTANT_TEST_TEMPORAIRE = 15;
-
     /**
      * Vérifie qu'un montant respecte les bornes et le pas autorisés.
      */
     public static function isValidAmount(int $montant): bool
     {
-        // TODO(TEST TEMPORAIRE) : à supprimer.
-        if ($montant === self::MONTANT_TEST_TEMPORAIRE) {
-            return true;
-        }
-
         return $montant >= self::MONTANT_MIN
             && $montant <= self::MONTANT_MAX
             && $montant % self::MULTIPLE_DE === 0;
@@ -64,11 +52,6 @@ class ContributionFeeCalculatorService
                 . number_format(self::MONTANT_MAX, 0, ',', ' ')
                 . ' FCFA, par multiples de ' . self::MULTIPLE_DE . '.'
             );
-        }
-
-        // TODO(TEST TEMPORAIRE) : à supprimer.
-        if ($montant === self::MONTANT_TEST_TEMPORAIRE) {
-            return 5;
         }
 
         return match (true) {

@@ -84,6 +84,12 @@ return [
             'max_attempts'    => 10,
             'decay_minutes'   => 5,
         ],
+
+        // Initiation de retrait : max 5 par 10 min (par user) — argent réel sortant
+        'retrait_initiation' => [
+            'max_attempts'    => 5,
+            'decay_minutes'   => 10,
+        ],
     ],
 
     /*

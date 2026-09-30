@@ -40,7 +40,7 @@ return new class extends Migration
             // Uniquement pour les anciens : désigné de service ce mois
             $table->boolean('est_de_service')->default(false);
 
-            // ─── Photo de profil (URL Cloudinary) ─────────────────────────────
+            // ─── Photo de profil (URL publique, stockage local) ────────────────
             $table->text('photoUrl')->nullable();
 
             // ─── Informations de profil ───────────────────────────────────────

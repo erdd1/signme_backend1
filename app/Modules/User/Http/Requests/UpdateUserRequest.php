@@ -29,6 +29,8 @@ class UpdateUserRequest extends FormRequest
 
             // ─── Démographie ────────────────────────────────────────────
             'sexe'              => ['nullable', 'string', Rule::in(User::SEXES)],
+            'matricule'         => ['sometimes', 'nullable', 'string', 'regex:' . User::MATRICULE_REGEX],
+            'estCommuniant'     => ['sometimes', 'boolean'],
             'dateNaissance'     => ['nullable', 'date', 'before:today'],
             'quartierId'        => ['nullable', 'integer', 'exists:quartiers,id'],
             'villeId'           => ['nullable', 'integer', 'exists:villes,id'],

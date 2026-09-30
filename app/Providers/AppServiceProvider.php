@@ -29,7 +29,14 @@ use App\Modules\UserLookup\Application\Services\QuartierService;
 use App\Modules\UserLookup\Application\Services\VilleService;
 use App\Modules\Push\Application\Services\DeviceTokenService;
 use App\Modules\Push\Application\Services\PushNotificationService;
-use App\Core\Services\CloudinaryService;
+use App\Modules\AboutChurch\Application\Services\AboutChurchService;
+use App\Modules\AboutChurch\Application\Services\AboutChurchArticleService;
+use App\Modules\AboutChurch\Application\Services\ChurchAboutInfoService;
+use App\Modules\Tresorerie\Application\Services\SortieFinanciereService;
+use App\Modules\Retrait\Application\Services\RetraitService;
+use App\Modules\Celebration\Application\Services\CelebrationService;
+use App\Modules\Celebration\Application\Services\CelebrationTypeService;
+use App\Core\Services\ImageStorageService;
 use App\Core\Services\PaymentQueueHealthService;
 
 /**
@@ -45,20 +52,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Cloudinary Laravel lit filesystems.disks.cloudinary (absent) — on force config/cloudinary.php
-        $this->app->singleton(\Cloudinary\Cloudinary::class, function ($app) {
-            $cloudUrl = $app['config']->get('cloudinary.cloud_url');
-            if (empty($cloudUrl)) {
-                throw new \InvalidArgumentException(
-                    'Cloudinary non configuré : définissez CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET et CLOUDINARY_CLOUD_NAME dans .env'
-                );
-            }
-
-            return new \Cloudinary\Cloudinary($cloudUrl);
-        });
-
         // ─── Services communs ─────────────────────────────────────────────────
-        $this->app->singleton(CloudinaryService::class);
+        $this->app->singleton(ImageStorageService::class);
         $this->app->singleton(PaymentQueueHealthService::class);
 
         // ─── Module Auth ──────────────────────────────────────────────────────
@@ -116,7 +111,7 @@ class AppServiceProvider extends ServiceProvider
         // ─── Module User ──────────────────────────────────────────────────────
         $this->app->singleton(UserService::class, function ($app) {
             return new UserService(
-                $app->make(CloudinaryService::class)
+                $app->make(ImageStorageService::class)
             );
         });
 
@@ -160,7 +155,7 @@ class AppServiceProvider extends ServiceProvider
         // ─── Module Evenement (collecte de fonds) ─────────────────────────────
         $this->app->singleton(EvenementService::class, function ($app) {
             return new EvenementService(
-                $app->make(CloudinaryService::class),
+                $app->make(ImageStorageService::class),
             );
         });
 
@@ -175,6 +170,37 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(MesContributionsService::class);
+
+        // ─── Module AboutChurch ("À propos de mon Église") ────────────────────
+        $this->app->singleton(ChurchAboutInfoService::class);
+
+        $this->app->singleton(AboutChurchArticleService::class, function ($app) {
+            return new AboutChurchArticleService(
+                $app->make(ImageStorageService::class),
+            );
+        });
+
+        $this->app->singleton(AboutChurchService::class, function ($app) {
+            return new AboutChurchService(
+                $app->make(ChurchAboutInfoService::class),
+                $app->make(AboutChurchArticleService::class),
+            );
+        });
+
+        // ─── Module Tresorerie (sorties financières) ───────────────────────────
+        $this->app->singleton(SortieFinanciereService::class);
+
+        // ─── Module Celebration (anniversaires + occasions calendaires) ───────
+        $this->app->singleton(CelebrationService::class);
+        $this->app->singleton(CelebrationTypeService::class);
+
+        // ─── Module Retrait (payout NotchPay vers Orange Money/MTN) ───────────
+        $this->app->singleton(RetraitService::class, function ($app) {
+            return new RetraitService(
+                $app->make(SortieFinanciereService::class),
+                $app->make(NotchPayGateway::class),
+            );
+        });
     }
 
     /**

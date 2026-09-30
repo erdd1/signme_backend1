@@ -1,0 +1,16 @@
+[Unit]
+Description=SignMe Laravel Reverb WebSocket Server
+After=network.target
+
+[Service]
+User=deploy
+Group=deploy
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/www/signmecy-api
+ExecStart=/usr/bin/php /var/www/signmecy-api/artisan reverb:start --host=0.0.0.0 --port=8080
+StandardOutput=append:/var/www/signmecy-api/storage/logs/reverb.log
+StandardError=append:/var/www/signmecy-api/storage/logs/reverb.log
+
+[Install]
+WantedBy=multi-user.target

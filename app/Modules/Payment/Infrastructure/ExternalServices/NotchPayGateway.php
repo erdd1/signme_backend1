@@ -5,9 +5,11 @@ namespace App\Modules\Payment\Infrastructure\ExternalServices;
 use App\Core\Exceptions\ApiException;
 use Exception;
 use GuzzleHttp\Exception\GuzzleException;
+use NotchPay\Beneficiary;
 use NotchPay\Exceptions\ApiException as NotchPayApiException;
 use NotchPay\NotchPay;
 use NotchPay\Payment;
+use NotchPay\Transfer;
 use Throwable;
 
 /**
@@ -250,6 +252,141 @@ class NotchPayGateway
     }
 
     /**
+     * Enregistre un bénéficiaire de retrait (Orange Money / MTN Mobile Money)
+     * auprès de NotchPay — appelé une seule fois par utilisateur (pasteur/
+     * trésorier), réutilisé pour chaque retrait (RetraitBeneficiaire).
+     *
+     * @return array{id: string, raw: array}
+     * @throws Exception|NotchPayApiException
+     */
+    public function createBeneficiary(string $name, string $phone, string $operator): array
+    {
+        $formattedPhone = $this->formatPhoneNumber($phone);
+        $channel = $this->mapOperatorToChannel($operator);
+
+        try {
+            $response = Beneficiary::create([
+                'channel'        => $channel,
+                'name'           => $name,
+                'account_number' => $formattedPhone,
+                'phone'          => $formattedPhone,
+                'country'        => 'CM',
+            ]);
+
+            $data = json_decode(json_encode($response), true);
+            $beneficiary = $data['beneficiary'] ?? $data;
+            $id = $beneficiary['id'] ?? null;
+
+            if (!$id) {
+                throw new Exception('Réponse NotchPay invalide (identifiant bénéficiaire manquant).');
+            }
+
+            return ['id' => $id, 'raw' => $beneficiary];
+        } catch (NotchPayApiException $e) {
+            \Log::error('NotchPay API Error (création bénéficiaire)', [
+                'error'  => $e->getMessage(),
+                'errors' => $e->errors,
+            ]);
+            throw $e;
+        } catch (GuzzleException $e) {
+            \Log::error('NotchPay erreur serveur (création bénéficiaire)', [
+                'error' => $e->getMessage(),
+                'body'  => $this->guzzleResponseBody($e),
+            ]);
+            throw ApiException::serviceUnavailable(
+                'NotchPay est momentanément indisponible. Réessayez dans quelques instants.'
+            );
+        }
+    }
+
+    /**
+     * Déclenche un retrait (Transfer) vers un bénéficiaire déjà enregistré.
+     *
+     * @return array Représentation associative du transfert NotchPay (id, reference, status, ...).
+     * @throws Exception|NotchPayApiException
+     */
+    public function initiateTransfer(
+        string $beneficiaryId,
+        int $amount,
+        string $description,
+        string $reference
+    ): array {
+        try {
+            \Log::info('NotchPay initiateTransfer - Envoi requête', [
+                'beneficiaryId' => $beneficiaryId,
+                'amount'        => $amount,
+                'reference'     => $reference,
+            ]);
+
+            $response = Transfer::initialize([
+                'amount'      => $amount,
+                'currency'    => 'XAF',
+                'beneficiary' => $beneficiaryId,
+                'description' => $description,
+                'reference'   => $reference,
+            ]);
+
+            $data = json_decode(json_encode($response), true);
+            $transfer = $data['transfer'] ?? $data;
+
+            if (empty($transfer['id'])) {
+                throw new Exception('Réponse NotchPay invalide (transfert non initialisé).');
+            }
+
+            \Log::info('NotchPay initiateTransfer - Transfert initié', [
+                'reference'          => $reference,
+                'notchpayTransferId' => $transfer['id'],
+                'status'             => $transfer['status'] ?? null,
+            ]);
+
+            return $transfer;
+        } catch (NotchPayApiException $e) {
+            \Log::error('NotchPay API Error (transfert)', [
+                'error'     => $e->getMessage(),
+                'errors'    => $e->errors,
+                'reference' => $reference,
+            ]);
+            throw $e;
+        } catch (GuzzleException $e) {
+            \Log::error('NotchPay erreur serveur (transfert)', [
+                'error'     => $e->getMessage(),
+                'body'      => $this->guzzleResponseBody($e),
+                'reference' => $reference,
+            ]);
+            throw ApiException::serviceUnavailable(
+                'NotchPay est momentanément indisponible. Réessayez dans quelques instants.'
+            );
+        }
+    }
+
+    /**
+     * Revérifie le statut d'un retrait directement auprès de NotchPay — utile
+     * en secours si le webhook `transfer.*` n'arrive pas.
+     *
+     * @return array|null Représentation associative du transfert, ou null si indisponible.
+     */
+    public function verifyTransfer(string $reference): ?array
+    {
+        try {
+            \Log::info('NotchPay verifyTransfer - Requête', ['reference' => $reference]);
+
+            $response = Transfer::verify($reference);
+            $data = json_decode(json_encode($response), true);
+            $transfer = $data['transfer'] ?? $data;
+
+            \Log::info('NotchPay verifyTransfer - Réponse', ['reference' => $reference, 'data' => $transfer]);
+
+            return $transfer;
+        } catch (Throwable $e) {
+            \Log::error('NotchPay verifyTransfer - Erreur', [
+                'reference' => $reference,
+                'error'     => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
      * Valide la signature HMAC-SHA256 du webhook NotchPay.
      *
      * NotchPay signe le corps BRUT (JSON non ré-encodé) de la requête avec
@@ -308,7 +445,7 @@ class NotchPayGateway
         return $payment->transaction->reference ?? $payment->reference ?? null;
     }
 
-    private function mapOperatorToChannel(string $operator): string
+    public function mapOperatorToChannel(string $operator): string
     {
         return match (strtoupper($operator)) {
             'ORANGE MONEY' => 'cm.orange',

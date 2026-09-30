@@ -4,6 +4,7 @@ namespace App\Modules\User\Http;
 
 use App\Http\Controllers\Controller;
 use App\Core\Traits\ApiResponseTrait;
+use App\Modules\User\Application\Services\UserExportPdfService;
 use App\Modules\User\Application\Services\UserService;
 use App\Modules\User\Http\Requests\CreateUserRequest;
 use App\Modules\User\Http\Requests\UpdateUserRequest;
@@ -28,7 +29,8 @@ class UserController extends Controller
     use ApiResponseTrait;
 
     public function __construct(
-        private readonly UserService $userService
+        private readonly UserService $userService,
+        private readonly UserExportPdfService $userExportPdfService
     ) {}
 
     /**
@@ -48,6 +50,18 @@ class UserController extends Controller
             ->through(fn ($user) => new UserResource($user));
 
         return $this->paginatedResponse($users, 'Membres récupérés avec succès.');
+    }
+
+    /**
+     * GET /api/v1/users/export-pdf
+     * Export PDF de la liste complète des membres de l'église (nom, rôle,
+     * groupe, date de naissance, quartier...) — pasteur/secrétaire uniquement.
+     */
+    public function exportPdf(Request $request)
+    {
+        $pdf = $this->userExportPdfService->generate($request->user());
+
+        return $pdf->download('membres-' . now()->format('Y-m-d') . '.pdf');
     }
 
     /**
@@ -120,6 +134,27 @@ class UserController extends Controller
                 'reason' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * GET /api/v1/users/next-matricule
+     * Prochain identifiant disponible (H001-H999 / F001-F999) pour l'église
+     * courante (ou church_id explicite côté admin) et le sexe demandé —
+     * alimente le mode "génération automatique" du formulaire de création.
+     * Query: sexe (homme|femme, requis), church_id (admin uniquement)
+     */
+    public function nextMatricule(Request $request): JsonResponse
+    {
+        $sexe = $request->get('sexe');
+        if (!in_array($sexe, \App\Models\User::SEXES, true)) {
+            return $this->errorResponse('Le paramètre "sexe" est requis (homme|femme).', 422);
+        }
+
+        $churchId = $request->get('church_id') ? (int) $request->get('church_id') : null;
+
+        $matricule = $this->userService->nextAvailableMatricule($request->user(), $churchId, $sexe);
+
+        return $this->successResponse(['matricule' => $matricule], 'Identifiant disponible récupéré avec succès.');
     }
 
     /**

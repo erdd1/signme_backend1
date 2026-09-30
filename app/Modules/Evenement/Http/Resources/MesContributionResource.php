@@ -21,6 +21,8 @@ class MesContributionResource extends JsonResource
             'montantTotal'    => $this->montantTotal,
             'statut'          => $this->statut,
             'paymentMethod'   => $this->paymentMethod,
+            'paymentOperator' => $this->paymentOperator,
+            'paymentNumber'   => $this->paymentNumber,
             'paymentReference' => $this->payment_reference,
             'note'            => $this->note,
             'createdAt'       => $this->created_at?->toIso8601String(),

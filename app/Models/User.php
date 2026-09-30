@@ -29,6 +29,9 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string|null      $dateConfirmation
  * @property string|null      $lieuConfirmation
  * @property string|null      $sexe                                  homme|femme
+ * @property string|null      $matricule                             Identifiant propre à l'église (H001-H999 / F001-F999)
+ * @property bool             $estCommuniant                         false uniquement possible pour le rôle paroissien
+ * @property \Carbon\Carbon|null $communiantDepuis                     Posée au passage false→true (plancher pour signer)
  * @property \Carbon\Carbon|null $dateNaissance
  * @property int|null         $quartierResidenceId
  * @property int|null         $villeResidenceId
@@ -71,6 +74,12 @@ use Laravel\Sanctum\HasApiTokens;
         self::SEXE_FEMME,
     ];
 
+    /** Format de l'identifiant propre à l'église : H/F + 3 chiffres (ex. H011, F112). */
+    public const MATRICULE_REGEX = '/^[HF]\d{3}$/';
+
+    /** Message affiché à un paroissien non communiant sur toute fonctionnalité bloquée. */
+    public const MSG_NOT_COMMUNIANT = "Vous ne pouvez pas avoir accès à cette fonctionnalité car vous n'êtes pas communiant.";
+
     public const REGIONS = [
         'Adamaoua',
         'Centre',
@@ -89,10 +98,11 @@ use Laravel\Sanctum\HasApiTokens;
         'email',
         'password',
         'churchId',
-        // 'role', 'actif' et 'est_de_service' sont volontairement EXCLUS :
-        // champs sensibles (privilège/statut de compte), assignés
-        // explicitement via propriété + save() dans les services
-        // concernés, jamais via mass-assignment.
+        // 'role', 'actif', 'est_de_service', 'estCommuniant' et
+        // 'communiantDepuis' sont volontairement EXCLUS : champs sensibles
+        // (privilège/statut de compte), assignés explicitement via
+        // propriété + save() dans les services concernés, jamais via
+        // mass-assignment.
         'photoUrl',
         'telephone',
         'profession',
@@ -101,8 +111,8 @@ use Laravel\Sanctum\HasApiTokens;
         'lieuConfirmation',
         // ─── Démographie ────────────────────────────────────────────────
         'sexe',
+        'matricule',
         'dateNaissance',
-        'lastBirthdayPushAt',
         'quartierResidenceId',
         'villeResidenceId',
         'groupePrincipalId',
@@ -123,9 +133,10 @@ use Laravel\Sanctum\HasApiTokens;
             'actif'                                => 'boolean',
             'is_super_admin'                       => 'boolean',
             'est_de_service'                       => 'boolean',
+            'estCommuniant'                        => 'boolean',
+            'communiantDepuis'                     => 'date',
             'dateConfirmation'                     => 'date',
             'dateNaissance'                         => 'date',
-            'lastBirthdayPushAt'                    => 'date',
             'password'                             => 'hashed',
             // ─── Badges ──────────────────────────────────────────────────
             'last_read_historique_at'              => 'datetime',

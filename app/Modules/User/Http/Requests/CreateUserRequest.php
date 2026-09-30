@@ -28,6 +28,14 @@ class CreateUserRequest extends FormRequest
 
             // ─── Démographie ────────────────────────────────────────────
             'sexe'              => ['nullable', 'string', Rule::in(User::SEXES)],
+            'matricule'         => ['nullable', 'string', 'regex:' . User::MATRICULE_REGEX],
+
+            // Obligatoire uniquement pour le rôle paroissien — les autres
+            // rôles sont et seront toujours communiants (forcé en service).
+            'estCommuniant'     => [
+                Rule::requiredIf(fn () => $this->input('role') === User::ROLE_PAROISSIEN),
+                'boolean',
+            ],
             'dateNaissance'     => ['nullable', 'date', 'before:today'],
             'quartierId'        => ['nullable', 'integer', 'exists:quartiers,id'],
             'villeId'           => ['nullable', 'integer', 'exists:villes,id'],
@@ -50,6 +58,8 @@ class CreateUserRequest extends FormRequest
             'churchId.exists'       => 'L\'église spécifiée n\'existe pas.',
             'originaireDe.in'       => 'Région invalide. Valeurs acceptées : ' . implode(', ', User::REGIONS),
             'sexe.in'               => 'Le sexe doit être "homme" ou "femme".',
+            'matricule.regex'       => 'L\'identifiant doit être au format H001-H999 (homme) ou F001-F999 (femme).',
+            'estCommuniant.required' => 'Le statut communiant/non communiant est obligatoire pour un paroissien.',
             'dateNaissance.before'  => 'La date de naissance doit être dans le passé.',
             'quartierId.exists'     => 'Ce quartier n\'existe pas.',
             'villeId.exists'        => 'Cette ville n\'existe pas.',

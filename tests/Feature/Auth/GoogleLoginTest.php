@@ -66,7 +66,8 @@ class GoogleLoginTest extends TestCase
     {
         User::factory()->create([
             'email' => 'admin@test.com',
-            'role'  => 'administrateur',
+            'role' => 'administrateur',
+            'is_super_admin' => true,
             'actif' => true,
         ]);
 

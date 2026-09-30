@@ -15,7 +15,9 @@ use Illuminate\Queue\SerializesModels;
  *
  * Payload Flutter :
  * {
- *   "publications":         2,
+ *   "annonces":             1,
+ *   "meditations":          2,
+ *   "evenements":           0,
  *   "historique":           0,
  *   "historique_signatures": 1
  * }
@@ -26,7 +28,9 @@ class BadgeUpdated implements ShouldBroadcastNow
 
     public function __construct(
         public readonly int $userId,
-        public readonly int $publications        = 0,
+        public readonly int $annonces           = 0,
+        public readonly int $meditations        = 0,
+        public readonly int $evenements         = 0,
         public readonly int $historique          = 0,
         public readonly int $historiqueSignatures = 0,
     ) {}
@@ -46,8 +50,10 @@ class BadgeUpdated implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'publications'         => $this->publications,
-            'historique'           => $this->historique,
+            'annonces'              => $this->annonces,
+            'meditations'           => $this->meditations,
+            'evenements'            => $this->evenements,
+            'historique'            => $this->historique,
             'historique_signatures' => $this->historiqueSignatures,
         ];
     }

@@ -58,7 +58,14 @@ class PublicationService
             }
 
             if (!empty($filters['type'])) {
+                // Un paroissien non communiant n'a pas acces aux meditations —
+                // ni en filtre explicite ni dans le flux "all" ci-dessous.
+                if ($filters['type'] === Publication::TYPE_MEDITATION && !$authUser->estCommuniant) {
+                    throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
+                }
                 $query->where('type', $filters['type']);
+            } elseif (!$authUser->estCommuniant) {
+                $query->where('type', '!=', Publication::TYPE_MEDITATION);
             }
 
             return $query;
@@ -70,8 +77,12 @@ class PublicationService
             return $buildQuery()->paginate($perPage);
         }
 
+        // Le flag communiant fait partie de la clé : sans ca, un paroissien non
+        // communiant pourrait recevoir une page "all" mise en cache par un
+        // membre communiant (avec meditations) — ou l'inverse.
+        $commFlag = $authUser->estCommuniant ? '1' : '0';
         $version = (int) Cache::get("pub:version:{$churchKey}", 1);
-        $cacheKey = "pub:list:{$churchKey}:{$version}:{$type}:{$perPage}:{$page}";
+        $cacheKey = "pub:list:{$churchKey}:{$version}:{$type}:{$commFlag}:{$perPage}:{$page}";
 
         return Cache::remember($cacheKey, now()->addMinutes(3), function () use ($buildQuery, $perPage) {
             return $buildQuery()->paginate($perPage);
@@ -158,6 +169,10 @@ class PublicationService
         // Verifier que la publication appartient a la bonne eglise
         if (!$authUser->isAdmin() && $pub->churchId !== $authUser->churchId) {
             throw ApiException::forbidden('Acces refuse a cette publication.');
+        }
+
+        if ($pub->type === Publication::TYPE_MEDITATION && !$authUser->estCommuniant) {
+            throw ApiException::forbidden(User::MSG_NOT_COMMUNIANT);
         }
 
         return $pub;

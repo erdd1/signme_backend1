@@ -1,0 +1,16 @@
+[Unit]
+Description=SignMe Laravel Queue Worker
+After=network.target postgresql.service redis-server.service
+
+[Service]
+User=deploy
+Group=deploy
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/www/signmecy-api
+ExecStart=/usr/bin/php /var/www/signmecy-api/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+StandardOutput=append:/var/www/signmecy-api/storage/logs/queue-worker.log
+StandardError=append:/var/www/signmecy-api/storage/logs/queue-worker.log
+
+[Install]
+WantedBy=multi-user.target

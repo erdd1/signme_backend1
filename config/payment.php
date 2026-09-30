@@ -51,6 +51,20 @@ return [
     'notchpay' => [
         // Désactivable uniquement en local/démo (jamais en production).
         'webhook_verify_signature' => env('NOTCHPAY_WEBHOOK_VERIFY_SIGNATURE', true),
+
+        // Frais retenus sur un retrait (Transfer), en % du montant demandé —
+        // voir RetraitFeeCalculatorService : taux non exposé par l'API
+        // NotchPay, à renseigner avec la valeur réelle du contrat marchand.
+        'transfer_fee_percent' => env('NOTCHPAY_TRANSFER_FEE_PERCENT', 0),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retraits (payout NotchPay)
+    |--------------------------------------------------------------------------
+    */
+    'retrait' => [
+        'montant_min' => (int) env('RETRAIT_MONTANT_MIN', 1000),
     ],
 
 ];

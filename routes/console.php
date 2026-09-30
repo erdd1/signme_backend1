@@ -11,7 +11,7 @@ use App\Modules\Evenement\Application\Jobs\ArchiveExpiredEvenementsJob;
 use App\Modules\Evenement\Application\Jobs\ExpireStaleContributionsJob;
 use App\Modules\Payment\Application\Jobs\ExpireStalePaymentTransactionsJob;
 use App\Modules\Payment\Application\Jobs\PurgeOldPaymentSyncLogsJob;
-use App\Modules\Push\Application\Jobs\SendBirthdayPushesJob;
+use App\Modules\Push\Application\Jobs\SendCelebrationPushesJob;
 use App\Modules\System\Application\Jobs\RunDatabaseBackupJob;
 
 Artisan::command('inspire', function () {
@@ -111,15 +111,16 @@ Artisan::command('inspire', function () {
 
 /*
 |─────────────────────────────────────────────────────────────────────────────
-| Scheduler — Notifications push d'anniversaire (6h heure locale)
+| Scheduler — Module Célébrations (anniversaire + 8 occasions calendaires,
+| 6h heure locale de chaque utilisateur)
 |─────────────────────────────────────────────────────────────────────────────
 */
-\Illuminate\Support\Facades\Schedule::job(new SendBirthdayPushesJob())
+\Illuminate\Support\Facades\Schedule::job(new SendCelebrationPushesJob())
     ->everyFifteenMinutes()
-    ->name('send-birthday-pushes')
-    ->after(fn () => SystemHealthService::recordHeartbeat('send-birthday-pushes'))
+    ->name('send-celebration-pushes')
+    ->after(fn () => SystemHealthService::recordHeartbeat('send-celebration-pushes'))
     ->onFailure(function () {
-        \Illuminate\Support\Facades\Log::error('Job SendBirthdayPushesJob a échoué');
+        \Illuminate\Support\Facades\Log::error('Job SendCelebrationPushesJob a échoué');
     });
 
 /*

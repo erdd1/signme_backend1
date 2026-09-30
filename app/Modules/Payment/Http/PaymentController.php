@@ -19,9 +19,11 @@ use App\Modules\Payment\Application\Jobs\ProcessPaymentWebhookJob;
 use App\Modules\Signature\Application\Services\SignatureService;
 use App\Modules\Auth\Application\Services\RateLimitService;
 use App\Modules\Evenement\Application\Jobs\ProcessEvenementContributionWebhookJob;
+use App\Modules\Retrait\Application\Jobs\ProcessRetraitWebhookJob;
 use App\Models\PaymentEvent;
 use App\Models\PaymentSyncLog;
 use App\Models\PaymentTransaction;
+use App\Models\Retrait;
 use App\Models\Signature;
 use App\Models\Contribution;
 use Illuminate\Http\Request;
@@ -98,13 +100,17 @@ class PaymentController extends Controller
             // ─── 3. Traitement asynchrone (file Redis payments) ─────────────────
             // Une référence NotchPay appartient soit à une transaction "signature"
             // (payment_transactions), soit à une contribution événement
-            // (contributions) : on route vers le bon job sans dupliquer la
+            // (contributions), soit à un retrait (retraits — payout, events
+            // `transfer.*`) : on route vers le bon job sans dupliquer la
             // vérification de signature ni le gateway NotchPay. Le même lookup
             // sert aussi à enregistrer l'événement d'audit "webhook_received".
             $resultingStatus = $this->notchPayGateway->mapStatus($data['status'] ?? '');
-            $contribution = Contribution::where('payment_reference', $paymentRef)->first();
+            $retrait = Retrait::where('reference', $paymentRef)->first();
+            $contribution = $retrait ? null : Contribution::where('payment_reference', $paymentRef)->first();
 
-            if ($contribution) {
+            if ($retrait) {
+                ProcessRetraitWebhookJob::dispatch($data);
+            } elseif ($contribution) {
                 PaymentEventRecorder::recordEvent(
                     null,
                     $contribution->id,

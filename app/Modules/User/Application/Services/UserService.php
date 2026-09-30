@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Models\Ville;
 use App\Core\Exceptions\ApiException;
 use App\Core\Helpers\DbCompat;
-use App\Core\Services\CloudinaryService;
+use App\Core\Services\ImageStorageService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
@@ -36,7 +36,7 @@ class UserService
     private const RELATIONS = ['church', 'quartier', 'ville', 'groupePrincipal', 'groupes'];
 
     public function __construct(
-        private readonly CloudinaryService $cloudinaryService
+        private readonly ImageStorageService $imageStorageService
     ) {}
 
     /**
@@ -282,7 +282,7 @@ class UserService
             }
         }
 
-        // La photo passe uniquement par POST /users/{id}/photo (Cloudinary).
+        // La photo passe uniquement par POST /users/{id}/photo.
         unset($data['photoUrl'], $data['photo_url']);
 
         $churchId = $user->churchId;
@@ -391,7 +391,7 @@ class UserService
     }
 
     /**
-     * Upload/met à jour la photo de profil d'un membre (Cloudinary).
+     * Upload/met à jour la photo de profil d'un membre.
      *
      * @throws ApiException
      */
@@ -402,18 +402,17 @@ class UserService
         $this->assertCanUploadPhoto($authUser, $user);
 
         // Validation du type MIME
-        if (!CloudinaryService::isValidImage($file)) {
+        if (!ImageStorageService::isValidImage($file)) {
             throw ApiException::badRequest('Format de fichier non supporté. Utilisez JPG, PNG ou WebP.');
         }
 
         // Supprimer l'ancienne photo si elle existe
         if ($user->photoUrl) {
-            $this->cloudinaryService->deleteByUrl($user->photoUrl);
+            $this->imageStorageService->deleteByUrl($user->photoUrl);
         }
 
-        // Upload sur Cloudinary
-        $publicId   = $this->cloudinaryService->generateUserPublicId($user->id);
-        $photoUrl   = $this->cloudinaryService->uploadProfilePhoto($file, $publicId);
+        $filename   = $this->imageStorageService->generateUserFilename($user->id);
+        $photoUrl   = $this->imageStorageService->uploadProfilePhoto($file, $filename);
 
         $user->update(['photoUrl' => $photoUrl]);
 
@@ -489,9 +488,9 @@ class UserService
             );
         }
 
-        // Supprimer la photo Cloudinary
+        // Supprimer la photo de profil stockée localement
         if ($user->photoUrl) {
-            $this->cloudinaryService->deleteByUrl($user->photoUrl);
+            $this->imageStorageService->deleteByUrl($user->photoUrl);
         }
 
         // Révoquer les tokens

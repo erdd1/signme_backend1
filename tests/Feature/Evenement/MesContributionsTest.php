@@ -73,13 +73,13 @@ class MesContributionsTest extends TestCase
     }
 
     /**
-     * L'utilisateur a déjà vu le résultat de sa tentative (réussie, échouée
-     * ou en attente) via l'écran de confirmation du paiement — l'historique
-     * "Mes dépenses" ne doit montrer que les paiements réellement reçus.
-     * Les statuts pending/failed restent visibles côté trésorerie (pasteur/
-     * secrétaire/trésorier), pas ici.
+     * L'utilisateur doit voir sa contribution apparaître dès l'envoi (statut
+     * pending), puis son statut final (completed/failed) — jamais disparaître
+     * ni rester invisible entre-temps. Scopé à l'utilisateur connecté
+     * (`userId`) : lui seul (et la trésorerie, via un autre endpoint) voit
+     * ces statuts intermédiaires.
      */
-    public function test_pending_and_failed_contributions_are_never_shown(): void
+    public function test_pending_and_failed_contributions_are_shown_to_owner(): void
     {
         $church = Church::factory()->create();
         $auteur = User::factory()->create(['role' => 'pasteur', 'churchId' => $church->id]);
@@ -97,8 +97,30 @@ class MesContributionsTest extends TestCase
 
         $response->assertStatus(200);
         $data = $response->json('data');
-        $this->assertCount(1, $data);
-        $this->assertSame(700, $data[0]['montant']);
+        $this->assertCount(3, $data);
+        $montants = array_column($data, 'montant');
+        $this->assertContains(700, $montants);
+        $this->assertContains(1500, $montants);
+        $this->assertContains(3000, $montants);
+    }
+
+    public function test_contribution_includes_payment_operator_and_number(): void
+    {
+        $church = Church::factory()->create();
+        $auteur = User::factory()->create(['role' => 'pasteur', 'churchId' => $church->id]);
+        $moi = User::factory()->create(['role' => 'paroissien', 'churchId' => $church->id]);
+        $evenement = $this->evenement($church, $auteur);
+
+        $this->contribution($evenement, $moi, 700, Contribution::STATUT_COMPLETED);
+
+        $token = $moi->createToken('test')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->getJson('/api/v1/mes-contributions');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.0.paymentOperator', 'ORANGE MONEY')
+            ->assertJsonPath('data.0.paymentNumber', '699112233');
     }
 
     public function test_stats_total_ce_mois_cette_annee(): void

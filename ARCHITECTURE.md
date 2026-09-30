@@ -246,55 +246,9 @@ DB_USERNAME=root
 DB_PASSWORD=
 ```
 
-### Créer la base de données
-```bash
-php artisan migrate
-php artisan db:seed
-```
 
----
 
-## 🧪 Tests
 
-### Exécuter tous les tests
-```bash
-php artisan test
-```
-
-### Tests unitaires uniquement
-```bash
-php artisan test tests/Unit
-```
-
-### Tests d'intégration uniquement
-```bash
-php artisan test tests/Feature
-```
-
----
-
-## 🎯 Prochaines Étapes
-
-1. **Implémenter les Services métier** dans chaque module
-2. **Créer les Migrations** pour les tables (users, cards, signatures, payments, etc.)
-3. **Implémenter les Repositories** pour l'accès aux données
-4. **Créer les Modèles Eloquent** correspondants
-5. **Ajouter les validations** dans les Form Requests
-6. **Intégrer les passerelles de paiement** (Stripe, PayPal, etc.)
-7. **Tests unitaires et d'intégration** complets
-8. **Documentation API** avec OpenAPI/Swagger
-9. **Déploiement** sur serveur production
-
----
-
-## 📚 Ressources
-
-- [Laravel Documentation](https://laravel.com/docs)
-- [Domain-Driven Design](https://en.wikipedia.org/wiki/Domain-driven_design)
-- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
-- [API REST Best Practices](https://restfulapi.net/)
-
----
 
 **Version**: 1.0.0  
 **Dernière mise à jour**: 2026-04-21  

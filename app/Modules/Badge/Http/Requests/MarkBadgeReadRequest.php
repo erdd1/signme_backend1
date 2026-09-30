@@ -20,7 +20,8 @@ class MarkBadgeReadRequest extends FormRequest
     public function rules(): array
     {
         $validTypes = implode(',', [
-            BadgeService::TYPE_PUBLICATIONS,
+            BadgeService::TYPE_ANNONCES,
+            BadgeService::TYPE_MEDITATIONS,
             BadgeService::TYPE_EVENEMENTS,
             BadgeService::TYPE_HISTORIQUE,
             BadgeService::TYPE_HISTORIQUE_SIGNATURES,
@@ -35,7 +36,7 @@ class MarkBadgeReadRequest extends FormRequest
     {
         return [
             'type.required' => 'Le type de badge est obligatoire.',
-            'type.in'       => 'Type invalide. Valeurs acceptées : publications, evenements, historique, historique_signatures.',
+            'type.in'       => 'Type invalide. Valeurs acceptées : annonces, meditations, evenements, historique, historique_signatures.',
         ];
     }
 }

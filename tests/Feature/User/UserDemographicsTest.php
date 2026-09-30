@@ -32,6 +32,8 @@ class UserDemographicsTest extends TestCase
                 'password' => 'Password123',
                 'role' => User::ROLE_PAROISSIEN,
                 'sexe' => 'homme',
+                'matricule' => 'H001',
+                'estCommuniant' => true,
                 'dateNaissance' => '1995-05-10',
                 'originaireDe' => 'Centre',
                 'quartierId' => $quartier->id,
@@ -89,6 +91,7 @@ class UserDemographicsTest extends TestCase
                 'email' => 'jean.groupe@test.com',
                 'password' => 'Password123',
                 'role' => User::ROLE_PAROISSIEN,
+                'estCommuniant' => true,
                 'groupeIds' => [$groupe1->id],
                 'groupePrincipalId' => $groupeAutre->id,
             ]);
@@ -110,6 +113,7 @@ class UserDemographicsTest extends TestCase
                 'email' => 'jean.crosschurch@test.com',
                 'password' => 'Password123',
                 'role' => User::ROLE_PAROISSIEN,
+                'estCommuniant' => true,
                 'quartierId' => $quartierAutreEglise->id,
             ]);
 

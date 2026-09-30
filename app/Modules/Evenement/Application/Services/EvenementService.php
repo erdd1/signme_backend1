@@ -4,7 +4,7 @@ namespace App\Modules\Evenement\Application\Services;
 
 use App\Core\Exceptions\ApiException;
 use App\Core\Helpers\DbCompat;
-use App\Core\Services\CloudinaryService;
+use App\Core\Services\ImageStorageService;
 use App\Models\Evenement;
 use App\Models\EvenementStateTransition;
 use App\Models\User;
@@ -29,7 +29,7 @@ class EvenementService
     public const MODE_PLANIFIE  = 'planifie';
 
     public function __construct(
-        private readonly CloudinaryService $cloudinaryService,
+        private readonly ImageStorageService $imageStorageService,
     ) {}
 
     /**
@@ -172,9 +172,9 @@ class EvenementService
 
         $imageUrl = null;
         if ($image) {
-            $imageUrl = $this->cloudinaryService->uploadEvenementImage(
+            $imageUrl = $this->imageStorageService->uploadEvenementImage(
                 $image,
-                $this->cloudinaryService->generateEvenementPublicId()
+                $this->imageStorageService->generateEvenementFilename()
             );
         }
 
@@ -263,14 +263,22 @@ class EvenementService
             $updates['dateFin'] = $dateFin;
         }
 
+        $previousImageUrl = $evenement->imageUrl;
+
         if ($image) {
-            $updates['imageUrl'] = $this->cloudinaryService->uploadEvenementImage(
+            $updates['imageUrl'] = $this->imageStorageService->uploadEvenementImage(
                 $image,
-                $this->cloudinaryService->generateEvenementPublicId()
+                $this->imageStorageService->generateEvenementFilename()
             );
         }
 
         $evenement->update($updates);
+
+        // Supprimer l'ancienne image APRÈS la mise à jour réussie (jamais avant :
+        // si l'upload ou la sauvegarde échoue, l'ancienne image doit rester intacte).
+        if ($image && $previousImageUrl) {
+            $this->imageStorageService->deleteByUrl($previousImageUrl);
+        }
 
         return $evenement->fresh();
     }

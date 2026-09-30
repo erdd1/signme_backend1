@@ -130,7 +130,7 @@ class BadgeTest extends TestCase
     public function test_unauthenticated_user_cannot_mark_read(): void
     {
         $response = $this->postJson('/api/v1/notifications/badges/mark-read', [
-            'type' => 'publications',
+            'type' => 'annonces',
         ]);
 
         $response->assertStatus(401);
@@ -147,7 +147,8 @@ class BadgeTest extends TestCase
             ->assertJsonStructure([
                 'success',
                 'data' => [
-                    'publications',
+                    'annonces',
+                    'meditations',
                     'evenements',
                     'historique',
                     'historique_signatures',
@@ -164,14 +165,15 @@ class BadgeTest extends TestCase
         $response = $this->getBadges($user);
 
         $response->assertStatus(200)
-            ->assertJsonPath('data.publications', 0)
+            ->assertJsonPath('data.annonces', 0)
+            ->assertJsonPath('data.meditations', 0)
             ->assertJsonPath('data.evenements', 0)
             ->assertJsonPath('data.historique', 0)
             ->assertJsonPath('data.historique_signatures', 0);
     }
 
     // =========================================================================
-    // Tests — Badge Publications
+    // Tests — Badge Publications (Annonces / Méditations)
     // =========================================================================
 
     public function test_publication_badge_increases_when_publication_exists(): void
@@ -180,14 +182,17 @@ class BadgeTest extends TestCase
         $pasteur = $this->makeUser('pasteur', $church->id);
         $member  = $this->makeUser('paroissien', $church->id);
 
-        // Le pasteur crée une publication (sans passer par l'API pour isoler la logique badge)
-        $this->createPublication($pasteur, $church);
+        // Le pasteur crée une annonce et une méditation (sans passer par l'API
+        // pour isoler la logique badge)
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE]);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_MEDITATION]);
 
-        // Le member n'a pas encore lu → badge = 1
+        // Le member n'a rien lu → badge = 1 pour chaque type, indépendamment
         $response = $this->getBadges($member);
 
         $response->assertStatus(200)
-            ->assertJsonPath('data.publications', 1);
+            ->assertJsonPath('data.annonces', 1)
+            ->assertJsonPath('data.meditations', 1);
     }
 
     public function test_author_does_not_see_badge_for_own_publication(): void
@@ -196,7 +201,7 @@ class BadgeTest extends TestCase
         $pasteur = $this->makeUser('pasteur', $church->id);
 
         // Créer une pub et marquer l'auteur comme lecteur (comme le ferait PublicationService)
-        $pub = $this->createPublication($pasteur, $church);
+        $pub = $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE]);
         PublicationRead::create([
             'userId'        => $pasteur->id,
             'publicationId' => $pub->id,
@@ -207,30 +212,50 @@ class BadgeTest extends TestCase
         $response = $this->getBadges($pasteur);
 
         $response->assertStatus(200)
-            ->assertJsonPath('data.publications', 0);
+            ->assertJsonPath('data.annonces', 0);
     }
 
-    public function test_mark_publications_as_read_resets_badge_to_zero(): void
+    public function test_mark_annonces_as_read_resets_only_annonces_badge(): void
     {
         $church  = $this->makeChurch();
         $pasteur = $this->makeUser('pasteur', $church->id);
         $member  = $this->makeUser('paroissien', $church->id);
 
-        $this->createPublication($pasteur, $church);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE]);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_MEDITATION]);
 
-        // Vérifier que le badge est à 1
-        $this->getBadges($member)->assertJsonPath('data.publications', 1);
+        // Les deux badges sont à 1
+        $this->getBadges($member)
+            ->assertJsonPath('data.annonces', 1)
+            ->assertJsonPath('data.meditations', 1);
 
-        // Marquer comme lu
-        $response = $this->markRead($member, 'publications');
+        // Marquer uniquement les annonces comme lues
+        $response = $this->markRead($member, 'annonces');
 
         $response->assertStatus(200)
-            ->assertJsonPath('data.publications', 0);
+            ->assertJsonPath('data.annonces', 0)
+            // Le badge méditations reste intact — les deux types sont indépendants
+            ->assertJsonPath('data.meditations', 1);
 
-        // Vérifier en base
         $this->assertDatabaseHas('publication_reads', [
             'userId' => $member->id,
         ]);
+    }
+
+    public function test_mark_meditations_as_read_resets_only_meditations_badge(): void
+    {
+        $church  = $this->makeChurch();
+        $pasteur = $this->makeUser('pasteur', $church->id);
+        $member  = $this->makeUser('paroissien', $church->id);
+
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE]);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_MEDITATION]);
+
+        $response = $this->markRead($member, 'meditations');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.meditations', 0)
+            ->assertJsonPath('data.annonces', 1);
     }
 
     public function test_mark_read_response_contains_updated_counts(): void
@@ -239,10 +264,10 @@ class BadgeTest extends TestCase
         $member = $this->makeUser('paroissien', $church->id);
 
         // Aucune publication → mark-read doit renvoyer 0 pour tout
-        $response = $this->markRead($member, 'publications');
+        $response = $this->markRead($member, 'annonces');
 
         $response->assertStatus(200)
-            ->assertJsonStructure(['success', 'data' => ['publications', 'evenements', 'historique', 'historique_signatures']]);
+            ->assertJsonStructure(['success', 'data' => ['annonces', 'meditations', 'evenements', 'historique', 'historique_signatures']]);
     }
 
     public function test_multiple_publications_all_count_as_unread(): void
@@ -251,13 +276,13 @@ class BadgeTest extends TestCase
         $pasteur = $this->makeUser('pasteur', $church->id);
         $member  = $this->makeUser('paroissien', $church->id);
 
-        $this->createPublication($pasteur, $church);
-        $this->createPublication($pasteur, $church, ['titre' => 'Deuxième publication']);
-        $this->createPublication($pasteur, $church, ['titre' => 'Troisième publication']);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE]);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE, 'titre' => 'Deuxième annonce']);
+        $this->createPublication($pasteur, $church, ['type' => Publication::TYPE_ANNONCE, 'titre' => 'Troisième annonce']);
 
         $response = $this->getBadges($member);
 
-        $response->assertJsonPath('data.publications', 3);
+        $response->assertJsonPath('data.annonces', 3);
     }
 
     public function test_publication_badge_only_counts_own_church_publications(): void
@@ -268,11 +293,11 @@ class BadgeTest extends TestCase
         $member  = $this->makeUser('paroissien', $church2->id);
 
         // Publication dans l'église 1, membre dans l'église 2
-        $this->createPublication($pasteur, $church1);
+        $this->createPublication($pasteur, $church1, ['type' => Publication::TYPE_ANNONCE]);
 
         $response = $this->getBadges($member);
 
-        $response->assertJsonPath('data.publications', 0);
+        $response->assertJsonPath('data.annonces', 0);
     }
 
     // =========================================================================
@@ -543,7 +568,7 @@ class BadgeTest extends TestCase
         $church = $this->makeChurch();
         $ancien = $this->makeUser('ancien', $church->id);
 
-        foreach (['publications', 'evenements', 'historique', 'historique_signatures'] as $type) {
+        foreach (['annonces', 'meditations', 'evenements', 'historique', 'historique_signatures'] as $type) {
             $response = $this->markRead($ancien, $type);
             $response->assertStatus(200);
         }
