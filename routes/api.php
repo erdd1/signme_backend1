@@ -171,12 +171,11 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/{id}',            [UserController::class, 'show'])
              ->middleware('role:pasteur,secretaire');
 
-        // Modifier un membre (pasteur peut modifier le rôle, secrétaire non —
-        // voir UserService::update()). Restreint à la gestion des membres :
-        // jamais d'auto-édition par un rôle "client" (paroissien/ancien/trésorier),
-        // qui n'a aucun accès à cette route côté app mobile.
-        Route::put('/{id}',            [UserController::class, 'update'])
-             ->middleware('role:pasteur,secretaire');
+        // Modifier un membre (pasteur peut modifier le rôle, secrétaire non)
+        // OU sa propre fiche (tous rôles, champs non sensibles uniquement) —
+        // pas de middleware de rôle ici : UserService::update() applique les
+        // deux règles (gestion d'un AUTRE membre vs auto-édition limitée).
+        Route::put('/{id}',            [UserController::class, 'update']);
 
         // Upload own photo / user photo
         Route::post('/{id}/photo',     [UserController::class, 'uploadPhoto']);

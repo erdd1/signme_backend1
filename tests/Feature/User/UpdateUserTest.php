@@ -5,6 +5,8 @@
 use Tests\TestCase;
 use App\Models\User;
 use App\Models\Church;
+use App\Models\Quartier;
+use App\Models\Ville;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class UpdateUserTest extends TestCase
@@ -120,6 +122,7 @@ public function test_pasteur_cannot_assign_admin_role(): void
         'Bearer '.$token
     )->putJson("/api/v1/users/{$user->id}", [
         'role' => 'administrateur',
+        'is_super_admin' => true,
     ]);
 
     $response->assertStatus(403);
@@ -173,6 +176,99 @@ public function test_pasteur_cannot_update_user_from_another_church(): void
         'Authorization',
         'Bearer '.$token
     )->putJson("/api/v1/users/{$target->id}", [
+        'nom' => 'Tentative Modification',
+    ]);
+
+    $response->assertStatus(403);
+}
+
+public function test_paroissien_can_update_own_safe_fields(): void
+{
+    $church = Church::factory()->create();
+    $quartier = Quartier::factory()->create(['churchId' => $church->id]);
+    $ville = Ville::factory()->create(['churchId' => $church->id]);
+
+    $paroissien = User::factory()->create([
+        'role' => 'paroissien',
+        'churchId' => $church->id,
+    ]);
+
+    $token = $paroissien->createToken('test')->plainTextToken;
+
+    $response = $this->withHeader(
+        'Authorization',
+        'Bearer '.$token
+    )->putJson("/api/v1/users/{$paroissien->id}", [
+        'nom' => 'Mon Nouveau Nom',
+        'telephone' => '699887766',
+        'sexe' => 'homme',
+        'dateNaissance' => '2000-01-01',
+        'quartierId' => $quartier->id,
+        'villeId' => $ville->id,
+    ]);
+
+    $response->assertStatus(200);
+
+    $this->assertDatabaseHas('users', [
+        'id' => $paroissien->id,
+        'nom' => 'Mon Nouveau Nom',
+        'telephone' => '699887766',
+        'quartierResidenceId' => $quartier->id,
+        'villeResidenceId' => $ville->id,
+    ]);
+}
+
+public function test_paroissien_self_edit_silently_ignores_privileged_fields(): void
+{
+    $church = Church::factory()->create();
+
+    $paroissien = User::factory()->create([
+        'role' => 'paroissien',
+        'churchId' => $church->id,
+        'email' => 'original@test.com',
+    ]);
+
+    $token = $paroissien->createToken('test')->plainTextToken;
+
+    $response = $this->withHeader(
+        'Authorization',
+        'Bearer '.$token
+    )->putJson("/api/v1/users/{$paroissien->id}", [
+        'nom' => 'Nom Autorisé',
+        'role' => 'administrateur',
+        'email' => 'hacked@test.com',
+    ]);
+
+    $response->assertStatus(200);
+
+    $this->assertDatabaseHas('users', [
+        'id' => $paroissien->id,
+        'nom' => 'Nom Autorisé',
+        'role' => 'paroissien',
+        'email' => 'original@test.com',
+    ]);
+}
+
+public function test_paroissien_cannot_update_another_member(): void
+{
+    $church = Church::factory()->create();
+
+    $paroissien = User::factory()->create([
+        'role' => 'paroissien',
+        'churchId' => $church->id,
+    ]);
+
+    $other = User::factory()->create([
+        'role' => 'paroissien',
+        'churchId' => $church->id,
+    ]);
+
+    $token = $paroissien->createToken('test')->plainTextToken;
+
+    $response = $this->withHeader(
+        'Authorization',
+        'Bearer '.$token
+    )->putJson("/api/v1/users/{$other->id}", [
         'nom' => 'Tentative Modification',
     ]);
 

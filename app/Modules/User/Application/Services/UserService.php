@@ -233,6 +233,31 @@ class UserService
     {
         $user = $this->findById($authUser, $targetId);
 
+        $isSelfEdit = $authUser->id === $user->id;
+        $isClientRole = !$authUser->isAdmin() && !$authUser->isPasteur() && !$authUser->isSecretaire();
+
+        // Modifier un AUTRE membre reste réservé à pasteur/secrétaire (+
+        // admin) — un rôle "client" (paroissien/ancien/trésorier) n'a plus
+        // cette route bloquée en amont par middleware, donc ce garde-fou est
+        // désormais appliqué ici.
+        if (!$isSelfEdit && $isClientRole) {
+            throw ApiException::forbidden('Vous n\'avez pas la permission de modifier ce membre.');
+        }
+
+        // Auto-édition par un rôle "client" : limitée aux champs non
+        // sensibles exposés par l'app mobile (Nom, Téléphone, Sexe, Date de
+        // naissance, Quartier, Ville) — jamais le rôle, l'église, le
+        // matricule, les groupes ou le mot de passe (qui passe par
+        // l'endpoint dédié de changement de mot de passe). Tout autre champ
+        // envoyé est silencieusement ignoré plutôt que rejeté, puisque l'app
+        // mobile ne les envoie jamais pour ces rôles — seule une requête
+        // forgée à la main pourrait tenter de les inclure.
+        if ($isSelfEdit && $isClientRole) {
+            $data = array_intersect_key($data, array_flip([
+                'nom', 'telephone', 'sexe', 'dateNaissance', 'quartierId', 'villeId',
+            ]));
+        }
+
         // Seul le super admin peut modifier un compte administrateur (y
         // compris un mini-admin avec le droit "modifier" sur Utilisateurs) —
         // et seul lui peut promouvoir quelqu'un vers ce rôle.
@@ -741,9 +766,8 @@ class UserService
     /**
      * Règles photo de profil :
      * - Admin : tout le monde
-     * - Pasteur / secrétaire : membres de la même église (pas soi pour secrétaire/autres)
-     * - Pasteur : peut modifier sa propre photo
-     * - Autres rôles : ne peuvent pas modifier leur propre photo
+     * - Tout rôle : peut modifier sa propre photo
+     * - Pasteur / secrétaire : membres de la même église (en plus de la leur)
      */
     private function assertCanUploadPhoto(User $authUser, User $target): void
     {
@@ -751,14 +775,7 @@ class UserService
             return;
         }
 
-        $isSelf = $authUser->id === $target->id;
-
-        if ($isSelf) {
-            if (!$authUser->isPasteur()) {
-                throw ApiException::forbidden(
-                    'Vous ne pouvez pas modifier votre propre photo de profil. Contactez votre pasteur ou secrétaire.'
-                );
-            }
+        if ($authUser->id === $target->id) {
             return;
         }
 
