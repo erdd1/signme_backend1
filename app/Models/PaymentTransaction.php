@@ -15,12 +15,6 @@ class PaymentTransaction extends Model
     use HasFactory;
 
     public const METHOD_MOBILE_MONEY = 'mobile_money';
-    public const METHOD_CARD         = 'card';
-
-    public const PAYMENT_METHODS = [
-        self::METHOD_MOBILE_MONEY,
-        self::METHOD_CARD,
-    ];
 
     protected $table = 'payment_transactions';
 

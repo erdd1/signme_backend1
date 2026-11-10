@@ -324,7 +324,6 @@ class SeedDemoData extends Command
             foreach ($contributeurs as $user) {
                 $montant = $montants[array_rand($montants)];
                 $calcul = ContributionFeeCalculatorService::calculateTotal($montant);
-                $isCard = fake()->boolean(20);
 
                 $contribution = Contribution::create([
                     'uuid'            => (string) Str::uuid(),
@@ -333,9 +332,9 @@ class SeedDemoData extends Command
                     'montant'         => $calcul['montant'],
                     'frais'           => $calcul['frais'],
                     'montantTotal'    => $calcul['total'],
-                    'paymentOperator' => $isCard ? null : fake()->randomElement(['ORANGE MONEY', 'MTN MOBILE MONEY']),
-                    'paymentNumber'   => $isCard ? null : '6' . fake()->numerify('########'),
-                    'paymentMethod'   => $isCard ? Contribution::METHOD_CARD : Contribution::METHOD_MOBILE_MONEY,
+                    'paymentOperator' => fake()->randomElement(['ORANGE MONEY', 'MTN MOBILE MONEY']),
+                    'paymentNumber'   => '6' . fake()->numerify('########'),
+                    'paymentMethod'   => Contribution::METHOD_MOBILE_MONEY,
                     'payment_reference' => 'DEMO-CONTRIB-' . Str::random(10),
                     'statut'          => Contribution::STATUT_COMPLETED,
                 ]);

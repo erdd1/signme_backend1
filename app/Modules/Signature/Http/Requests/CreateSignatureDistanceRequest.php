@@ -20,9 +20,9 @@ class CreateSignatureDistanceRequest extends FormRequest
             'months'          => ['required', 'array', 'min:1', 'max:12'],
             'months.*'        => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
             'amount'          => ['required', 'integer', 'in:' . implode(',', FeeCalculator::ALLOWED_AMOUNTS)],
-            'paymentMethod'   => ['required', 'string', 'in:mobile_money,card'],
-            'paymentOperator' => ['required_if:paymentMethod,mobile_money', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
-            'phoneNumber'     => ['required_if:paymentMethod,mobile_money', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
+            'paymentMethod'   => ['required', 'string', 'in:mobile_money'],
+            'paymentOperator' => ['required', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
+            'phoneNumber'     => ['required', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
         ];
     }
 
@@ -35,10 +35,10 @@ class CreateSignatureDistanceRequest extends FormRequest
             'amount.required'            => 'Le montant de l\'offrande est obligatoire.',
             'amount.in'                  => 'Montant invalide. Valeurs autorisées : ' . implode(', ', FeeCalculator::ALLOWED_AMOUNTS) . ' FCFA.',
             'paymentMethod.required'     => 'La méthode de paiement est obligatoire.',
-            'paymentMethod.in'           => 'Méthode de paiement invalide. Utilisez : mobile_money ou card.',
-            'paymentOperator.required_if' => 'L\'opérateur mobile money est obligatoire.',
+            'paymentMethod.in'           => 'Méthode de paiement invalide. Seul le paiement Mobile Money est disponible.',
+            'paymentOperator.required' => 'L\'opérateur mobile money est obligatoire.',
             'paymentOperator.in'         => 'Opérateur invalide. Utilisez : ORANGE MONEY ou MTN MOBILE MONEY.',
-            'phoneNumber.required_if'    => 'Le numéro de téléphone est obligatoire.',
+            'phoneNumber.required'    => 'Le numéro de téléphone est obligatoire.',
             'phoneNumber.regex'          => 'Numéro invalide. Format attendu : 237699803165 ou 699803165.',
         ];
     }

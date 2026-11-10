@@ -16,12 +16,8 @@ use Throwable;
  * Class NotchPayGateway
  *
  * Service d'intégration avec l'API NotchPay — remplace CampayGateway.
- * Couvre les deux méthodes de paiement de l'application :
- *   - Mobile Money (Orange Money, MTN Mobile Money) : initialize() + charge()
- *     déclenche un PUSH USSD, comme le faisait CampayGateway.
- *   - Carte bancaire (Visa/Mastercard/prépayée) : initialize() seul, renvoie
- *     une page de paiement hébergée par NotchPay (authorization_url) — nous
- *     ne manipulons jamais de donnée de carte nous-mêmes (conformité PCI).
+ * Paiement Mobile Money (Orange Money, MTN Mobile Money) : initialize() +
+ * charge() déclenche un PUSH USSD, comme le faisait CampayGateway.
  */
 class NotchPayGateway
 {
@@ -119,7 +115,12 @@ class NotchPayGateway
                 'errors'    => $e->errors,
                 'paymentId' => $paymentId,
             ]);
-            throw $e;
+            // Une erreur 4xx de NotchPay (numéro non reconnu par l'opérateur,
+            // canal désactivé…) est une erreur de saisie ou de configuration,
+            // jamais un « Server Error » opaque pour l'utilisateur.
+            throw ApiException::unprocessable(
+                "Ce numéro n'est pas reconnu comme un compte {$operator}. Vérifiez l'opérateur choisi et le numéro saisi."
+            );
         } catch (GuzzleException $e) {
             // Le SDK NotchPay ne convertit en NotchPayApiException que les
             // erreurs 4xx (voir Request::setHttpResponse) — une panne 5xx
@@ -147,71 +148,6 @@ class NotchPayGateway
         if (!method_exists($e, 'getResponse')) return null;
         $response = $e->getResponse();
         return $response?->getBody()->getContents();
-    }
-
-    /**
-     * Initie un paiement par carte bancaire — retourne le lien de la page
-     * de paiement hébergée NotchPay à ouvrir dans une WebView.
-     *
-     * @return array{reference: string, authorizationUrl: string}
-     * @throws Exception|NotchPayApiException
-     */
-    public function initiateCardPayment(
-        int $paymentId,
-        int $amount,
-        string $description,
-        string $email,
-        string $callbackUrl
-    ): array {
-        try {
-            \Log::info('NotchPay initiateCardPayment - Envoi requête', [
-                'paymentId' => $paymentId,
-                'amount'    => $amount,
-            ]);
-
-            $payment = Payment::initialize([
-                'amount'         => $amount,
-                'currency'       => 'XAF',
-                'email'          => $email,
-                'description'    => $description,
-                'reference'      => "PAYMENT-{$paymentId}-" . now()->timestamp,
-                'callback'       => $callbackUrl,
-                // Sans ce paramètre, la page hébergée NotchPay affiche le
-                // premier canal actif du compte marchand (Mobile Money chez
-                // nous) au lieu de la carte — confirmé en sandbox.
-                'locked_channel' => 'card',
-            ]);
-
-            $reference = $this->extractReference($payment);
-            $authorizationUrl = $payment->authorization_url ?? null;
-
-            if (!$reference || !$authorizationUrl) {
-                throw new Exception('Réponse NotchPay invalide (référence ou lien de paiement manquant).');
-            }
-
-            \Log::info('NotchPay initiateCardPayment - Lien de paiement généré', [
-                'paymentId' => $paymentId,
-                'reference' => $reference,
-            ]);
-
-            return ['reference' => $reference, 'authorizationUrl' => $authorizationUrl];
-        } catch (NotchPayApiException $e) {
-            \Log::error('NotchPay API Error (carte)', [
-                'error'     => $e->getMessage(),
-                'errors'    => $e->errors,
-                'paymentId' => $paymentId,
-            ]);
-            throw $e;
-        } catch (GuzzleException $e) {
-            \Log::error('NotchPay erreur serveur (carte)', [
-                'error'     => $e->getMessage(),
-                'body'      => $this->guzzleResponseBody($e),
-                'paymentId' => $paymentId,
-            ]);
-            throw ApiException::serviceUnavailable(
-                'NotchPay est momentanément indisponible. Réessayez dans quelques instants.'
-            );
-        }
     }
 
     /**

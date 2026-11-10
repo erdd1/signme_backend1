@@ -120,29 +120,16 @@ class ContributionService
             );
 
             $description = "Contribution EEC - {$evenement->titre} - {$user->nom}";
-            $authorizationUrl = null;
 
             try {
-                if ($paymentMethod === Contribution::METHOD_CARD) {
-                    $result = $this->notchPayGateway->initiateCardPayment(
-                        $contribution->id,
-                        $feeData['total'],
-                        $description,
-                        $user->email,
-                        (string) config('services.notchpay.callback_url'),
-                    );
-                    $paymentRef = $result['reference'];
-                    $authorizationUrl = $result['authorizationUrl'];
-                } else {
-                    $paymentRef = $this->notchPayGateway->initiateMobileMoney(
-                        $contribution->id,
-                        $paymentNumber,
-                        $paymentOperator,
-                        $feeData['total'],
-                        $description,
-                        $user->email,
-                    );
-                }
+                $paymentRef = $this->notchPayGateway->initiateMobileMoney(
+                    $contribution->id,
+                    $paymentNumber,
+                    $paymentOperator,
+                    $feeData['total'],
+                    $description,
+                    $user->email,
+                );
 
                 $contribution->update(['payment_reference' => $paymentRef]);
 
@@ -151,7 +138,7 @@ class ContributionService
                     $contribution->id,
                     PaymentEvent::TYPE_SENT_TO_GATEWAY,
                     'pending',
-                    ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod, 'authorization_url' => $authorizationUrl],
+                    ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod],
                 );
 
                 $this->contributionPollingDispatcher->schedule($contribution->id, $paymentRef);
@@ -183,10 +170,7 @@ class ContributionService
                     : new ApiException('Erreur lors de l\'initiation du paiement.', 500);
             }
 
-            $fresh = $contribution->fresh();
-            $fresh->authorizationUrl = $authorizationUrl;
-
-            return $fresh;
+            return $contribution->fresh();
         });
     }
 

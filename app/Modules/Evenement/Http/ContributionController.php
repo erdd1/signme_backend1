@@ -53,13 +53,9 @@ class ContributionController extends Controller
 
         $contribution = $this->contributionService->initiate($request->user(), $uuid, $request->validated());
 
-        $message = $contribution->paymentMethod === Contribution::METHOD_CARD
-            ? 'Paiement initié avec succès. Complétez votre paiement par carte.'
-            : 'Paiement initié avec succès. Confirmez sur votre téléphone.';
-
         return $this->createdResponse(
             (new ContributionResource($contribution))->toArray($request),
-            $message
+            'Paiement initié avec succès. Confirmez sur votre téléphone.'
         );
     }
 

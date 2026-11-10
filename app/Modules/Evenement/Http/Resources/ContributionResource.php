@@ -29,7 +29,6 @@ class ContributionResource extends JsonResource
             'paymentNumber'   => $peutVoirDetails && $this->paymentNumber ? $this->maskPhoneNumber($this->paymentNumber) : null,
             'paymentMethod'   => $this->paymentMethod,
             'paymentReference' => $peutVoirDetails ? $this->payment_reference : null,
-            'authorizationUrl' => $this->authorizationUrl ?? null,
             'contributeur'    => $peutVoirDetails ? [
                 'id'     => $this->user?->id,
                 'nom'    => $this->user?->nom,

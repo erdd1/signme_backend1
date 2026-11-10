@@ -45,22 +45,20 @@ class SignatureService
     // =========================================================================
 
     /**
-     * Initie une signature à distance avec paiement NotchPay (Mobile Money
-     * ou carte bancaire).
+     * Initie une signature à distance avec paiement NotchPay Mobile Money.
      *
      * Étapes :
      * 1. Valider les mois (non futurs, non déjà signés, pas de doublons)
      * 2. Calculer les frais selon la grille EEC
      * 3. Créer les signatures en statut 'pending'
-     * 4. Initier le paiement NotchPay (PUSH Mobile Money, ou lien de paiement
-     *    carte à ouvrir dans une WebView)
-     * 5. Retourner la référence (et le lien carte le cas échéant) au Flutter
+     * 4. Initier le paiement NotchPay (PUSH Mobile Money)
+     * 5. Retourner la référence au Flutter
      *
      * @param User  $paroissien  Utilisateur connecté (paroissien)
-     * @param array $data        Données validées : { months, amount, paymentMethod (mobile_money|card),
-     *                           paymentOperator? (ORANGE MONEY|MTN MOBILE MONEY, requis si mobile_money),
-     *                           phoneNumber? (requis si mobile_money) }
-     * @return array              { payment_reference, total_amount, authorization_url? }
+     * @param array $data        Données validées : { months, amount, paymentMethod (mobile_money),
+     *                           paymentOperator (ORANGE MONEY|MTN MOBILE MONEY),
+     *                           phoneNumber }
+     * @return array              { payment_reference, total_amount, ... }
      * @throws ApiException
      */
     public function initiateDistanceSignature(User $paroissien, array $data): array
@@ -76,8 +74,8 @@ class SignatureService
 
         $months        = $data['months'];      // ['2026-01', '2026-02', ...]
         $amount        = (int) $data['amount'];
-        $paymentMethod = $data['paymentMethod']; // mobile_money | card
-        $paymentOperator = $data['paymentOperator'] ?? null; // ORANGE MONEY | MTN MOBILE MONEY (mobile_money uniquement)
+        $paymentMethod = $data['paymentMethod']; // mobile_money
+        $paymentOperator = $data['paymentOperator'] ?? null; // ORANGE MONEY | MTN MOBILE MONEY
         $phoneNumber   = $data['phoneNumber'] ?? null;
 
         Log::info("Initiation de signature à distance", [
@@ -168,7 +166,6 @@ class SignatureService
 
             // ─── 5. Initier le paiement NotchPay ────────────────────────────
             $description = "Sainte Cène EEC - " . count($months) . " mois - {$paroissien->nom}";
-            $authorizationUrl = null;
 
             Log::info("Initiation du paiement NotchPay", [
                 'transaction_id' => $transaction->id,
@@ -178,26 +175,14 @@ class SignatureService
             ]);
 
             try {
-                if ($paymentMethod === PaymentTransaction::METHOD_CARD) {
-                    $result = $this->notchPayGateway->initiateCardPayment(
-                        $transaction->id,
-                        $feeData['total'],
-                        $description,
-                        $paroissien->email,
-                        (string) config('services.notchpay.callback_url'),
-                    );
-                    $paymentRef = $result['reference'];
-                    $authorizationUrl = $result['authorizationUrl'];
-                } else {
-                    $paymentRef = $this->notchPayGateway->initiateMobileMoney(
-                        $transaction->id,
-                        $phoneNumber,
-                        $paymentOperator,
-                        $feeData['total'],
-                        $description,
-                        $paroissien->email,
-                    );
-                }
+                $paymentRef = $this->notchPayGateway->initiateMobileMoney(
+                    $transaction->id,
+                    $phoneNumber,
+                    $paymentOperator,
+                    $feeData['total'],
+                    $description,
+                    $paroissien->email,
+                );
 
                 $transaction->update(['payment_reference' => $paymentRef]);
 
@@ -210,16 +195,14 @@ class SignatureService
                     null,
                     PaymentEvent::TYPE_SENT_TO_GATEWAY,
                     'pending',
-                    ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod, 'authorization_url' => $authorizationUrl],
+                    ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod],
                 );
 
                 Log::info("✅ Paiement NotchPay lancé avec succès", [
                     'transaction_id'    => $transaction->id,
                     'payment_reference' => $paymentRef,
                     'status'            => 'pending',
-                    'message'           => $paymentMethod === PaymentTransaction::METHOD_CARD
-                        ? 'Lien de paiement carte généré.'
-                        : 'Utilisateur doit confirmer sur son téléphone dans les 60s',
+                    'message'           => 'Utilisateur doit confirmer sur son téléphone dans les 60s',
                 ]);
 
                 PaymentStatusCache::putFromTransaction($transaction->fresh());
@@ -255,16 +238,13 @@ class SignatureService
 
             return [
                 'payment_reference' => $paymentRef,
-                'authorization_url' => $authorizationUrl,
                 'total_amount'      => $feeData['total'],
                 'amount_per_month'  => $amount,
                 'fees_per_month'    => $feeData['fees'],
                 'months_count'      => count($months),
                 'months'            => $months,
                 'status'            => 'pending',
-                'message'           => $paymentMethod === PaymentTransaction::METHOD_CARD
-                    ? 'Complétez votre paiement par carte.'
-                    : 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
+                'message'           => 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
                 'transaction_id'    => $transaction->id,
             ];
         });

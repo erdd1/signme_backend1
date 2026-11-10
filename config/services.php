@@ -36,7 +36,6 @@ return [
         'public_key' => env('NOTCHPAY_PUBLIC_KEY'),
         'private_key' => env('NOTCHPAY_PRIVATE_KEY'),
         'webhook_hash' => env('NOTCHPAY_WEBHOOK_HASH'),
-        'callback_url' => env('NOTCHPAY_CALLBACK_URL'),
     ],
 
     // Client OAuth "Web" créé dans Google Cloud Console — c'est l'audience

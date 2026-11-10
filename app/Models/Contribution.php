@@ -30,12 +30,6 @@ class Contribution extends Model
     public const ROLES_GESTION_FINANCIERE = ['pasteur', 'secretaire', 'tresorier'];
 
     public const METHOD_MOBILE_MONEY = 'mobile_money';
-    public const METHOD_CARD         = 'card';
-
-    public const PAYMENT_METHODS = [
-        self::METHOD_MOBILE_MONEY,
-        self::METHOD_CARD,
-    ];
 
     protected $fillable = [
         'uuid',
