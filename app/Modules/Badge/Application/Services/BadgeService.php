@@ -129,7 +129,8 @@ class BadgeService
             return 0; // Cohérent avec le badge publications : pas de badge pour l'admin
         }
 
-        $query = Evenement::where('churchId', $user->churchId)
+        $query = Evenement::collectes()
+            ->where('churchId', $user->churchId)
             ->whereIn('statut', [Evenement::STATUT_ACTIF, Evenement::STATUT_TERMINE])
             ->whereNotNull('publishedAt')
             ->where('auteurId', '!=', $user->id);

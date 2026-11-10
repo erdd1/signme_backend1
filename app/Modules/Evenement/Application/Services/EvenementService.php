@@ -44,6 +44,7 @@ class EvenementService
         $this->archiveOverdueEvenements();
 
         $query = Evenement::query()
+            ->collectes()
             ->with(['auteur', 'church'])
             ->orderByDesc('publishedAt')
             ->orderByDesc('dateDebut');
@@ -82,6 +83,7 @@ class EvenementService
         $this->archiveOverdueEvenements();
 
         $query = Evenement::query()
+            ->collectes()
             ->with(['auteur', 'church'])
             ->selectSub(
                 \App\Models\Contribution::selectRaw('COUNT(DISTINCT ' . DbCompat::quoteColumn('userId') . ')')
@@ -379,6 +381,7 @@ class EvenementService
     {
         $evenement = $this->findByUuid($authUser, $uuid);
         $this->assertPeutGererEvenements($authUser);
+        $this->assertEstUneCollecte($evenement);
 
         if ($evenement->statut !== Evenement::STATUT_TERMINE) {
             throw ApiException::badRequest('Seul un événement terminé peut être archivé.');
@@ -458,8 +461,22 @@ class EvenementService
         throw ApiException::forbidden('Seuls le pasteur et le secrétaire peuvent gérer les événements.');
     }
 
+    /** L'événement « Dons libres » est géré automatiquement : aucune action manuelle. */
+    private function assertEstUneCollecte(Evenement $evenement): void
+    {
+        if ($evenement->estDonLibre()) {
+            throw ApiException::forbidden('L\'événement « Dons libres » est géré automatiquement.');
+        }
+    }
+
+    /**
+     * Toute action réservée à l'auteur (modifier, publier, terminer, archiver…)
+     * est aussi refusée sur l'événement « Dons libres », jamais modifiable.
+     */
     private function assertEstAuteurOuAdmin(User $authUser, Evenement $evenement): void
     {
+        $this->assertEstUneCollecte($evenement);
+
         if ($authUser->isAdmin() || $evenement->auteurId === $authUser->id) {
             return;
         }
