@@ -27,6 +27,7 @@ use App\Modules\Tresorerie\Http\SortieFinanciereController;
 use App\Modules\Retrait\Http\RetraitController;
 use App\Modules\AboutChurch\Http\AboutChurchController;
 use App\Modules\Celebration\Http\CelebrationController;
+use App\Modules\Chant\Http\ChantController;
 use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
 use App\Modules\AdminAccess\Http\AdminAccessController;
@@ -373,6 +374,15 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/',            [CelebrationController::class, 'index']);
         Route::get('/{uuid}',      [CelebrationController::class, 'show']);
         Route::post('/{uuid}/read', [CelebrationController::class, 'markRead']);
+    });
+
+    // =========================================================================
+    // CLIENT CHANTS (Répertoire de chants — tous rôles)
+    // =========================================================================
+    // Aucune donnée persistée : recherche en ligne, copies temporaires en cache.
+    Route::prefix('chants')->middleware('throttle:chants')->group(function () {
+        Route::get('/search', [ChantController::class, 'search']);
+        Route::get('/{id}',   [ChantController::class, 'show'])->whereNumber('id');
     });
 
     // =========================================================================
