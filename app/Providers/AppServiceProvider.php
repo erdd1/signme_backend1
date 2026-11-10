@@ -38,6 +38,10 @@ use App\Modules\Celebration\Application\Services\CelebrationService;
 use App\Modules\Celebration\Application\Services\CelebrationTypeService;
 use App\Modules\Assistant\Application\Contracts\ChatModel;
 use App\Modules\Assistant\Infrastructure\OpenAiCompatibleChatClient;
+use App\Modules\Chant\Application\Contracts\LyricsFragmentResolver;
+use App\Modules\Chant\Application\Contracts\LyricsProvider;
+use App\Modules\Chant\Infrastructure\GeniusFragmentResolver;
+use App\Modules\Chant\Infrastructure\LrclibClient;
 use App\Core\Services\ImageStorageService;
 use App\Core\Services\PaymentQueueHealthService;
 
@@ -198,6 +202,9 @@ class AppServiceProvider extends ServiceProvider
 
         // ─── Module Assistant religieux (moteur au format chat/completions) ───
         $this->app->bind(ChatModel::class, OpenAiCompatibleChatClient::class);
+        // ─── Module Chants (paroles via LRCLIB, extraits via Genius) ──────────
+        $this->app->bind(LyricsProvider::class, LrclibClient::class);
+        $this->app->bind(LyricsFragmentResolver::class, GeniusFragmentResolver::class);
 
         // ─── Module Retrait (payout NotchPay vers Orange Money/MTN) ───────────
         $this->app->singleton(RetraitService::class, function ($app) {
@@ -215,6 +222,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureAuthRouteRateLimiting();
         $this->configureAssistantRateLimiting();
+        $this->configureChantsRateLimiting();
 
         // ─── Macro de réponse API globale ─────────────────────────────────────
         Response::macro('api', function ($data = null, $message = 'Succès', $code = 200) {
@@ -243,6 +251,18 @@ class AppServiceProvider extends ServiceProvider
                     'success' => false,
                     'message' => 'Vous posez vos questions un peu vite. Patientez quelques instants.',
                 ], 429, $headers));
+        });
+    }
+
+    /**
+     * Limite du répertoire de chants : protège les sources tierces (LRCLIB,
+     * Genius) contre les rafales d'un même utilisateur.
+     */
+    protected function configureChantsRateLimiting(): void
+    {
+        RateLimiter::for('chants', function (Request $request) {
+            return Limit::perMinute(config('chants.rate_limit_per_minute'))
+                ->by($request->user()?->id ?? $request->ip());
         });
     }
 
