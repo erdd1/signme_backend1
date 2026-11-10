@@ -36,6 +36,8 @@ use App\Modules\Tresorerie\Application\Services\SortieFinanciereService;
 use App\Modules\Retrait\Application\Services\RetraitService;
 use App\Modules\Celebration\Application\Services\CelebrationService;
 use App\Modules\Celebration\Application\Services\CelebrationTypeService;
+use App\Modules\Assistant\Application\Contracts\ChatModel;
+use App\Modules\Assistant\Infrastructure\OpenAiCompatibleChatClient;
 use App\Core\Services\ImageStorageService;
 use App\Core\Services\PaymentQueueHealthService;
 
@@ -194,6 +196,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CelebrationService::class);
         $this->app->singleton(CelebrationTypeService::class);
 
+        // ─── Module Assistant religieux (moteur au format chat/completions) ───
+        $this->app->bind(ChatModel::class, OpenAiCompatibleChatClient::class);
+
         // ─── Module Retrait (payout NotchPay vers Orange Money/MTN) ───────────
         $this->app->singleton(RetraitService::class, function ($app) {
             return new RetraitService(
@@ -209,6 +214,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureAuthRouteRateLimiting();
+        $this->configureAssistantRateLimiting();
 
         // ─── Macro de réponse API globale ─────────────────────────────────────
         Response::macro('api', function ($data = null, $message = 'Succès', $code = 200) {
@@ -222,6 +228,22 @@ class AppServiceProvider extends ServiceProvider
         // ─── Observers (activés quand les modèles existent) ───────────────────
         // \App\Models\Signature::observe(\App\Observers\SignatureObserver::class);
         // \App\Models\AncienDesignation::observe(\App\Observers\AncienDesignationObserver::class);
+    }
+
+    /**
+     * Limite de rafale de l'assistant (les quotas quotidiens sont appliqués
+     * par AssistantService, qui sait distinguer succès et échecs du moteur).
+     */
+    protected function configureAssistantRateLimiting(): void
+    {
+        RateLimiter::for('assistant', function (Request $request) {
+            return Limit::perMinute(config('assistant.rate_limit_per_minute'))
+                ->by($request->user()?->id ?? $request->ip())
+                ->response(fn (Request $request, array $headers) => response()->json([
+                    'success' => false,
+                    'message' => 'Vous posez vos questions un peu vite. Patientez quelques instants.',
+                ], 429, $headers));
+        });
     }
 
     /**

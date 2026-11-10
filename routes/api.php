@@ -27,6 +27,7 @@ use App\Modules\Tresorerie\Http\SortieFinanciereController;
 use App\Modules\Retrait\Http\RetraitController;
 use App\Modules\AboutChurch\Http\AboutChurchController;
 use App\Modules\Celebration\Http\CelebrationController;
+use App\Modules\Assistant\Http\AssistantController;
 use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
 use App\Modules\AdminAccess\Http\AdminAccessController;
@@ -374,6 +375,13 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/{uuid}',      [CelebrationController::class, 'show']);
         Route::post('/{uuid}/read', [CelebrationController::class, 'markRead']);
     });
+
+    // =========================================================================
+    // CLIENT ASSISTANT RELIGIEUX (chatbot — tous rôles)
+    // =========================================================================
+    // Aucune conversation stockée : l'app renvoie l'historique à chaque question.
+    Route::post('/assistant/chat', [AssistantController::class, 'chat'])
+        ->middleware('throttle:assistant');
 
     // =========================================================================
     // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)
