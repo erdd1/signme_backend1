@@ -29,6 +29,7 @@ use App\Modules\AboutChurch\Http\AboutChurchController;
 use App\Modules\Celebration\Http\CelebrationController;
 use App\Modules\Assistant\Http\AssistantController;
 use App\Modules\Chant\Http\ChantController;
+use App\Modules\Don\Http\DonController;
 use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
 use App\Modules\AdminAccess\Http\AdminAccessController;
@@ -392,6 +393,11 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::get('/search', [ChantController::class, 'search']);
         Route::get('/{id}',   [ChantController::class, 'show'])->whereNumber('id');
     });
+
+    // =========================================================================
+    // CLIENT DONS (service « Faire un don » hors événement — tous rôles)
+    // =========================================================================
+    Route::post('/dons', [DonController::class, 'store']);
 
     // =========================================================================
     // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)

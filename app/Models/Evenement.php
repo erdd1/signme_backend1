@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,9 @@ class Evenement extends Model
     public const STATUT_TERMINE   = 'termine';
     public const STATUT_ARCHIVE   = 'archive';
 
+    public const TYPE_COLLECTE  = 'collecte';
+    public const TYPE_DON_LIBRE = 'don_libre';
+
     public const STATUTS = [
         self::STATUT_BROUILLON,
         self::STATUT_PLANIFIE,
@@ -42,6 +46,7 @@ class Evenement extends Model
         'description',
         'imageUrl',
         'statut',
+        'type',
         'dateDebut',
         'dateFin',
         'publishedAt',
@@ -91,6 +96,17 @@ class Evenement extends Model
     }
 
     // ─── Helpers d'état ───────────────────────────────────────────────────────
+
+    /** Collectes de fonds proprement dites (exclut l'événement « Dons libres »). */
+    public function scopeCollectes(Builder $query): Builder
+    {
+        return $query->where('type', self::TYPE_COLLECTE);
+    }
+
+    public function estDonLibre(): bool
+    {
+        return $this->type === self::TYPE_DON_LIBRE;
+    }
 
     public function estActif(): bool
     {
