@@ -7,8 +7,9 @@ User=deploy
 Group=deploy
 Restart=always
 RestartSec=5
+UMask=0002
 WorkingDirectory=/var/www/signmecy-api
-ExecStart=/usr/bin/php /var/www/signmecy-api/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+ExecStart=/usr/bin/php /var/www/signmecy-api/artisan queue:work redis --queue=payments,retraits,default --sleep=3 --tries=3 --max-time=3600
 StandardOutput=append:/var/www/signmecy-api/storage/logs/queue-worker.log
 StandardError=append:/var/www/signmecy-api/storage/logs/queue-worker.log
 
