@@ -332,6 +332,26 @@ class CardPaymentTest extends TestCase
         $this->assertSame(1, $event->nombreContributions);
     }
 
+    public function test_only_the_card_brand_and_last_four_digits_are_kept(): void
+    {
+        $c = $this->pendingCardContribution(1000);
+        Http::fake(['api.flutterwave.com/v3/transactions/verify_by_reference*' => Http::response([
+            'status' => 'success',
+            'data' => [
+                'id' => 1, 'tx_ref' => 'x', 'status' => 'successful', 'amount' => 1053, 'currency' => 'XAF',
+                'card' => ['first_6digits' => '424242', 'last_4digits' => '4242', 'type' => 'visa',
+                           'issuer' => 'TEST BANK', 'expiry' => '09/32'],
+            ],
+        ])]);
+
+        $this->runSync($c);
+
+        $metadata = $c->fresh()->payment_metadata;
+        $this->assertSame(['last4' => '4242', 'brand' => 'VISA'], $metadata['card']);
+        $this->assertStringNotContainsString('424242', json_encode($metadata));
+        $this->assertStringNotContainsString('09/32', json_encode($metadata));
+    }
+
     public function test_the_credit_is_idempotent(): void
     {
         $c = $this->pendingCardContribution(1000);

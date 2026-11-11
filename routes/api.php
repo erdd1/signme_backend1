@@ -32,6 +32,7 @@ use App\Modules\Celebration\Http\CelebrationController;
 use App\Modules\Assistant\Http\AssistantController;
 use App\Modules\Chant\Http\ChantController;
 use App\Modules\Don\Http\DonController;
+use App\Modules\Transaction\Http\TransactionController;
 use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
 use App\Modules\AdminAccess\Http\AdminAccessController;
@@ -405,6 +406,12 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // CLIENT DONS (service « Faire un don » hors événement — tous rôles)
     // =========================================================================
     Route::post('/dons', [DonController::class, 'store']);
+
+    // =========================================================================
+    // CLIENT TRANSACTIONS (« Mes transactions » — toutes les opérations
+    // financières de l'utilisateur, tous rôles)
+    // =========================================================================
+    Route::get('/transactions', [TransactionController::class, 'index']);
 
     // =========================================================================
     // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)
