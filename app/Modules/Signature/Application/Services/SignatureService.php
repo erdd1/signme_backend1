@@ -56,7 +56,7 @@ class SignatureService
      * hébergée dont l'adresse est renvoyée dans `checkout_url`).
      *
      * Étapes :
-     * 1. Valider les mois (non futurs, non déjà signés, pas de doublons)
+     * 1. Valider les mois (au plus le mois prochain, non déjà signés, pas de doublons)
      * 2. Calculer les frais selon la grille EEC
      * 3. Créer les signatures en statut 'pending'
      * 4. Initier le paiement NotchPay (PUSH Mobile Money)
@@ -448,7 +448,7 @@ class SignatureService
         $amount = (int) $data['amount'];
 
         // Valider les mois (non déjà signés — pas de restriction sur les mois passés pour rattrapage)
-        $this->validateMonths($paroissien, $months, allowFuture: false);
+        $this->validateMonths($paroissien, $months);
 
         // Si le signataire est un ancien (non pasteur/admin), appliquer les règles de disponibilité
         if ($signateur->role === User::ROLE_ANCIEN && !$signateur->isAdmin()) {
@@ -491,7 +491,7 @@ class SignatureService
      * Règles:
      * - Pour le mois actuel: doit avoir une désignation ET respecter les jours/horaires
      * - Pour les mois passés: peut signer si a une QUELCONQUE désignation active ou expirée
-     * - Pour les mois futurs: NON autorisé
+     * - Au-delà du mois prochain: NON autorisé
      *
      * @param User $ancien
      * @param array $months ["YYYY-MM", ...]
@@ -512,11 +512,9 @@ class SignatureService
             $dateMonth = \Carbon\Carbon::createFromDate($year, $monthNum, 1);
             $endOfMonth = $dateMonth->copy()->endOfMonth();
 
-            // Vérifier que ce n'est pas un mois futur
-            if ($dateMonth->greaterThan($maintenant)) {
-                throw ApiException::badRequest(
-                    "Impossible de signer pour un mois futur ({$monthKey})."
-                );
+            // Au plus le mois prochain (même règle que la signature à distance)
+            if ($monthKey > self::dernierMoisSignable()) {
+                throw ApiException::badRequest(self::messageMoisTropLointain($monthKey));
             }
 
             // Vérifier que l'ancien a une désignation pour ce mois
@@ -948,6 +946,7 @@ class SignatureService
             'total_signe'       => $signatures->count(),
             'montant_total'     => $total,
             'signe_ce_mois'     => $signedThisMonth,
+            'dernier_mois_signable' => self::dernierMoisSignable(),
             'mois_disponibles'  => $this->getAvailableMonths($userId, $year, $authUser->communiantDepuis?->format('Y-m')),
         ];
     }
@@ -1191,16 +1190,33 @@ class SignatureService
     // ─── Helpers privés ───────────────────────────────────────────────────────
 
     /**
+     * Dernier mois pour lequel on peut signer : le mois PROCHAIN (« YYYY-MM »).
+     * En octobre on peut signer novembre mais pas décembre ; en décembre 2026,
+     * janvier 2027 mais pas février 2027. Règle unique, pour la signature à
+     * distance comme en présentiel, et pour tous les rôles.
+     */
+    public static function dernierMoisSignable(): string
+    {
+        // startOfMonth() avant addMonth() : pas de débordement un 29/30/31.
+        return now()->startOfMonth()->addMonth()->format('Y-m');
+    }
+
+    private static function messageMoisTropLointain(string $monthKey): string
+    {
+        return "Impossible de signer pour le mois {$monthKey} : vous pouvez signer jusqu'au mois prochain ("
+            . self::dernierMoisSignable() . ') au plus.';
+    }
+
+    /**
      * Valide une liste de mois (format YYYY-MM).
      *
-     * @throws ApiException si : mois futur, doublon en BDD, doublon dans la requête,
-     *                       ou antérieur à `communiantDepuis` (paroissien redevenu
-     *                       communiant : pas de rattrapage sur les mois bloqués)
+     * @throws ApiException si : au-delà du mois prochain, doublon en BDD, doublon dans
+     *                       la requête, ou antérieur à `communiantDepuis` (paroissien
+     *                       redevenu communiant : pas de rattrapage sur les mois bloqués)
      */
-    private function validateMonths(User $user, array $months, bool $allowFuture = false): void
+    private function validateMonths(User $user, array $months): void
     {
         $userId = $user->id;
-        $currentMonth = now()->format('Y-m');
         $communiantDepuisMonth = $user->communiantDepuis?->format('Y-m');
 
         // Pas de doublons dans la requête elle-même
@@ -1214,11 +1230,10 @@ class SignatureService
                 throw ApiException::badRequest("Format de mois invalide : {$monthKey}. Utilisez YYYY-MM.");
             }
 
-            // Mois non futur (sauf si explicitly autorisé)
-            if (!$allowFuture && $monthKey > $currentMonth) {
-                throw ApiException::badRequest(
-                    "Impossible de signer pour un mois futur ({$monthKey})."
-                );
+            // Au plus le mois prochain : le mois actuel, les mois passés (sous le
+            // plancher communiant ci-dessous) et le mois prochain sont signables.
+            if ($monthKey > self::dernierMoisSignable()) {
+                throw ApiException::badRequest(self::messageMoisTropLointain($monthKey));
             }
 
             // ─── Plancher communiant : jamais de signature avant le mois où le
@@ -1268,13 +1283,13 @@ class SignatureService
                            ->pluck('month')
                            ->toArray();
 
-        $currentMonth = now()->format('Y-m');
-        $available    = [];
+        $limite    = self::dernierMoisSignable();
+        $available = [];
 
         for ($m = 1; $m <= 12; $m++) {
             $monthKey = $year . '-' . str_pad($m, 2, '0', STR_PAD_LEFT);
             $afterCommuniantFloor = $communiantDepuisMonth === null || $monthKey >= $communiantDepuisMonth;
-            if (!in_array($monthKey, $signed, true) && $monthKey <= $currentMonth && $afterCommuniantFloor) {
+            if (!in_array($monthKey, $signed, true) && $monthKey <= $limite && $afterCommuniantFloor) {
                 $available[] = $monthKey;
             }
         }
