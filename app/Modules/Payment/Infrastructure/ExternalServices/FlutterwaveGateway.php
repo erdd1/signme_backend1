@@ -57,7 +57,7 @@ class FlutterwaveGateway implements PaymentStatusGateway
     /**
      * Statut réel d'un paiement d'après sa référence (tx_ref).
      *
-     * @return array{status: string, amount: float|int|null, currency: ?string, reference: string, transaction_id: mixed, gateway: string}|null
+     * @return array{status: string, amount: float|int|null, currency: ?string, reference: string, transaction_id: mixed, gateway: string, card?: array{last4: string, brand: ?string}}|null
      *         null tant que Flutterwave ne connaît pas encore la transaction
      *         (le fidèle n'a pas fini de payer) ou en cas d'erreur
      */
@@ -77,7 +77,7 @@ class FlutterwaveGateway implements PaymentStatusGateway
             return null;
         }
 
-        return [
+        $result = [
             'status'         => strtolower((string) ($data['status'] ?? '')),
             'amount'         => $data['amount'] ?? null,
             'currency'       => isset($data['currency']) ? strtoupper((string) $data['currency']) : null,
@@ -85,6 +85,17 @@ class FlutterwaveGateway implements PaymentStatusGateway
             'transaction_id' => $data['id'] ?? null,
             'gateway'        => 'flutterwave',
         ];
+
+        // Seuls la marque et les 4 derniers chiffres sont conservés (pour
+        // « Mes transactions ») : jamais le numéro de carte ni son début.
+        if (!empty($data['card']['last_4digits'])) {
+            $result['card'] = [
+                'last4' => (string) $data['card']['last_4digits'],
+                'brand' => isset($data['card']['type']) ? strtoupper((string) $data['card']['type']) : null,
+            ];
+        }
+
+        return $result;
     }
 
     /**
