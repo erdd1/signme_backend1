@@ -8,6 +8,9 @@ class StoreEntreeCashRequest extends BaseGroupeRequest
     {
         return [
             'montant'    => ['required', 'integer', 'min:1', 'max:1000000000'],
+            // Rattachement facultatif : communiqué du groupe et membre qui remet l'argent.
+            'communiqueUuid' => ['nullable', 'uuid'],
+            'membreId'       => ['nullable', 'integer'],
             'donateur'   => ['nullable', 'string', 'max:150'],
             'note'       => ['nullable', 'string', 'max:255'],
             'dateEntree' => ['nullable', 'date', 'before_or_equal:today'],

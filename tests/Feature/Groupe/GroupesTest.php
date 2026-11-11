@@ -422,6 +422,81 @@ class GroupesTest extends TestCase
             ->assertJsonPath('data.0.annule', true); // l'annulation reste visible
     }
 
+    public function test_cash_can_be_linked_to_a_communique_and_a_member_who_handed_it_over(): void
+    {
+        $c = $this->communique();
+        Sanctum::actingAs($this->tresorier);
+
+        $this->postJson($this->base() . '/entrees-cash', [
+            'montant' => 3000, 'communiqueUuid' => $c->uuid, 'membreId' => $this->membre->id,
+        ])->assertStatus(201);
+
+        $this->assertDatabaseHas('groupe_entrees_cash', [
+            'montant' => 3000, 'communiqueId' => $c->id, 'membreId' => $this->membre->id,
+        ]);
+
+        // Visible de tous : progression du communiqué, liste des contributeurs, historique de la caisse.
+        Sanctum::actingAs($this->membre);
+        $this->getJson($this->base() . '/communiques')->assertOk()
+            ->assertJsonPath('data.0.montantCollecte', 3000)
+            ->assertJsonPath('data.0.nombreContributions', 1);
+        $this->getJson($this->base() . "/communiques/{$c->uuid}/contributions")->assertOk()
+            ->assertJsonPath('data.0.nom', $this->membre->nom)
+            ->assertJsonPath('data.0.cash', true);
+        $this->getJson($this->base() . '/mouvements')->assertOk()
+            ->assertJsonPath('data.0.acteur', $this->membre->nom)
+            ->assertJsonPath('data.0.libelle', 'Dons de reconnaissance');
+    }
+
+    public function test_cash_for_a_communique_counts_with_online_contributions_but_the_caisse_stays_separated(): void
+    {
+        $c = $this->communique();
+        $this->contributionComplete($this->membre, 2000, $c);
+        Sanctum::actingAs($this->president);
+        $this->postJson($this->base() . '/entrees-cash', ['montant' => 3000, 'communiqueUuid' => $c->uuid])->assertStatus(201);
+
+        $this->getJson($this->base() . '/communiques')->assertOk()
+            ->assertJsonPath('data.0.montantCollecte', 5000)
+            ->assertJsonPath('data.0.nombreContributions', 2);
+        $this->getJson($this->base())->assertOk()
+            ->assertJsonPath('data.caisse.enLigne', 2000)
+            ->assertJsonPath('data.caisse.cash', 3000);
+    }
+
+    public function test_a_cancelled_cash_entry_no_longer_counts_for_its_communique(): void
+    {
+        $c = $this->communique();
+        Sanctum::actingAs($this->president);
+        $uuid = $this->postJson($this->base() . '/entrees-cash', ['montant' => 3000, 'communiqueUuid' => $c->uuid])->json('data.uuid');
+        $this->postJson($this->base() . "/entrees-cash/{$uuid}/annuler", ['motif' => 'Erreur'])->assertOk();
+
+        $this->getJson($this->base() . '/communiques')->assertOk()->assertJsonPath('data.0.montantCollecte', 0);
+        $this->getJson($this->base() . "/communiques/{$c->uuid}/contributions")->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    public function test_cash_cannot_target_a_foreign_communique_or_a_non_member(): void
+    {
+        $autre = Groupe::factory()->create(['churchId' => $this->church->id]);
+        $etranger = $autre->communiques()->create(['auteurId' => $this->president->id, 'titre' => 'Autre', 'message' => 'x']);
+        $horsGroupe = $this->chretien();
+        $archive = $this->communique(['archivedAt' => now()]);
+        Sanctum::actingAs($this->tresorier);
+
+        $this->postJson($this->base() . '/entrees-cash', ['montant' => 1000, 'communiqueUuid' => $etranger->uuid])->assertStatus(404);
+        $this->postJson($this->base() . '/entrees-cash', ['montant' => 1000, 'communiqueUuid' => $archive->uuid])->assertStatus(404);
+        $this->postJson($this->base() . '/entrees-cash', ['montant' => 1000, 'membreId' => $horsGroupe->id])->assertStatus(422);
+        $this->assertSame(0, \DB::table('groupe_entrees_cash')->count());
+    }
+
+    public function test_responsables_list_the_group_members_others_cannot(): void
+    {
+        Sanctum::actingAs($this->tresorier);
+        $this->getJson($this->base() . '/membres')->assertOk()->assertJsonCount(3, 'data');
+
+        Sanctum::actingAs($this->membre);
+        $this->getJson($this->base() . '/membres')->assertStatus(403);
+    }
+
     public function test_cash_validation(): void
     {
         Sanctum::actingAs($this->president);

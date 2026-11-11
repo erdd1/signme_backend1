@@ -17,6 +17,8 @@ class GroupeEntreeCash extends Model
     protected $fillable = [
         'groupeId',
         'auteurId',
+        'communiqueId',
+        'membreId',
         'montant',
         'donateur',
         'note',
@@ -48,6 +50,18 @@ class GroupeEntreeCash extends Model
     public function auteur(): BelongsTo
     {
         return $this->belongsTo(User::class, 'auteurId');
+    }
+
+    /** Communiqué auquel cet argent est destiné (facultatif). */
+    public function communique(): BelongsTo
+    {
+        return $this->belongsTo(GroupeCommunique::class, 'communiqueId');
+    }
+
+    /** Membre du groupe qui a remis l'argent (facultatif). */
+    public function membre(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'membreId');
     }
 
     public function estAnnulee(): bool

@@ -48,6 +48,7 @@ use Illuminate\Http\Request;
  * GET    /mes-groupes/{uuid}/communiques/{cuuid}/contributions
  * POST   /mes-groupes/{uuid}/contributions                       (communiqueUuid absent = don libre)
  * GET    /mes-groupes/{uuid}/mouvements
+ * GET    /mes-groupes/{uuid}/membres                             [président/trésorier]
  * POST   /mes-groupes/{uuid}/entrees-cash                        [président/trésorier]
  * POST   /mes-groupes/{uuid}/entrees-cash/{euuid}/annuler        [président/trésorier]
  * GET    /mes-groupes/{uuid}/retraits/beneficiaire               [président/trésorier]
@@ -136,18 +137,37 @@ class MesGroupesController extends Controller
         [$groupe] = $this->access->charger($request->user(), $uuid);
         $communique = $this->communiques->trouver($groupe, $communiqueUuid, inclureArchives: true);
 
-        $data = Contribution::where('communiqueId', $communique->id)
+        $enLigne = Contribution::where('communiqueId', $communique->id)
             ->where('statut', Contribution::STATUT_COMPLETED)
             ->with('user:id,nom,photoUrl')
             ->orderByDesc('created_at')
             ->limit(500)
             ->get()
             ->map(fn (Contribution $c) => [
-                'nom'     => $c->user?->nom,
+                'nom'      => $c->user?->nom,
                 'photoUrl' => $c->user?->photoUrl,
-                'montant' => $c->montant,
-                'date'    => $c->created_at?->toIso8601String(),
-            ])->values();
+                'montant'  => $c->montant,
+                'cash'     => false,
+                'date'     => $c->created_at?->toIso8601String(),
+            ]);
+
+        // Argent remis en main propre pour ce communiqué (annulations exclues) :
+        // au nom du membre choisi, à défaut du donateur saisi.
+        $cash = $communique->entreesCash()
+            ->whereNull('annuleAt')
+            ->with('membre:id,nom,photoUrl')
+            ->orderByDesc('created_at')
+            ->limit(500)
+            ->get()
+            ->map(fn ($e) => [
+                'nom'      => $e->membre?->nom ?: $e->donateur ?: 'Don en main propre',
+                'photoUrl' => $e->membre?->photoUrl,
+                'montant'  => $e->montant,
+                'cash'     => true,
+                'date'     => $e->created_at?->toIso8601String(),
+            ]);
+
+        $data = $enLigne->concat($cash)->sortByDesc('date')->values();
 
         return $this->successResponse($data, 'Contributions récupérées avec succès.');
     }
@@ -186,6 +206,20 @@ class MesGroupesController extends Controller
             $this->mouvements->lister($groupe, max((int) $request->get('page', 1), 1), $perPage),
             'Historique de la caisse récupéré avec succès.'
         );
+    }
+
+    /** Membres du groupe (choix du donateur d'une entrée cash) — président ou trésorier. */
+    public function membres(Request $request, string $uuid): JsonResponse
+    {
+        [$groupe] = $this->access->chargerResponsable($request->user(), $uuid);
+
+        $data = $groupe->membres()
+            ->orderBy('users.nom')
+            ->get(['users.id', 'users.nom', 'users.photoUrl'])
+            ->map(fn ($m) => ['id' => $m->id, 'nom' => $m->nom, 'photoUrl' => $m->photoUrl])
+            ->values();
+
+        return $this->successResponse($data, 'Membres récupérés avec succès.');
     }
 
     public function storeEntreeCash(StoreEntreeCashRequest $request, string $uuid): JsonResponse

@@ -15,10 +15,29 @@ use Illuminate\Support\Str;
  */
 class GroupeCashService
 {
+    /** @throws ApiException communiqué ou membre étranger au groupe */
     public function enregistrer(User $auteur, Groupe $groupe, array $data): GroupeEntreeCash
     {
+        $communique = null;
+        if (!empty($data['communiqueUuid'])) {
+            $communique = $groupe->communiques()
+                ->where('uuid', $data['communiqueUuid'])
+                ->whereNull('archivedAt')
+                ->first() ?? throw ApiException::notFound('Communiqué');
+        }
+
+        $membreId = null;
+        if (!empty($data['membreId'])) {
+            if (!$groupe->membres()->where('users.id', (int) $data['membreId'])->exists()) {
+                throw ApiException::unprocessable('Ce membre n\'appartient pas au groupe.');
+            }
+            $membreId = (int) $data['membreId'];
+        }
+
         return $groupe->entreesCash()->create([
             'auteurId'   => $auteur->id,
+            'communiqueId' => $communique?->id,
+            'membreId'   => $membreId,
             'montant'    => (int) $data['montant'],
             'donateur'   => isset($data['donateur']) ? trim($data['donateur']) ?: null : null,
             'note'       => isset($data['note']) ? trim($data['note']) ?: null : null,
