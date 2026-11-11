@@ -45,7 +45,7 @@
                     <td>{{ $membre->nom }}</td>
                     <td>{{ $membre->sexe === 'femme' ? 'Femme' : ($membre->sexe === 'homme' ? 'Homme' : '—') }}</td>
                     <td>{{ ucfirst($membre->role) }}</td>
-                    <td>{{ $membre->groupePrincipal?->nom ?? '—' }}</td>
+                    <td>{{ $membre->groupes->pluck('nom')->implode(', ') ?: '—' }}</td>
                     <td>{{ $membre->dateNaissance?->format('d/m/Y') ?? '—' }}</td>
                     <td>{{ $membre->quartier?->nom ?? '—' }}</td>
                     <td>{{ $membre->telephone ?? '—' }}</td>

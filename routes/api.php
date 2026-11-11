@@ -32,6 +32,7 @@ use App\Modules\Celebration\Http\CelebrationController;
 use App\Modules\Assistant\Http\AssistantController;
 use App\Modules\Chant\Http\ChantController;
 use App\Modules\Don\Http\DonController;
+use App\Modules\Groupe\Http\MesGroupesController;
 use App\Modules\Transaction\Http\TransactionController;
 use App\Modules\Celebration\Http\Admin\CelebrationTypeController;
 use App\Modules\System\Http\SystemController;
@@ -406,6 +407,32 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // CLIENT DONS (service « Faire un don » hors événement — tous rôles)
     // =========================================================================
     Route::post('/dons', [DonController::class, 'store']);
+
+    // =========================================================================
+    // CLIENT GROUPES (service « Groupes » — membres d'un groupe, droits par poste)
+    // =========================================================================
+    Route::prefix('mes-groupes')->group(function () {
+        Route::get('/',       [MesGroupesController::class, 'index']);
+        Route::get('/{uuid}', [MesGroupesController::class, 'show']);
+
+        Route::get('/{uuid}/communiques',                             [MesGroupesController::class, 'communiques']);
+        Route::post('/{uuid}/communiques',                            [MesGroupesController::class, 'storeCommunique']);
+        Route::put('/{uuid}/communiques/{communiqueUuid}',            [MesGroupesController::class, 'updateCommunique']);
+        Route::delete('/{uuid}/communiques/{communiqueUuid}',         [MesGroupesController::class, 'archiverCommunique']);
+        Route::get('/{uuid}/communiques/{communiqueUuid}/contributions', [MesGroupesController::class, 'contributionsCommunique']);
+
+        Route::post('/{uuid}/contributions', [MesGroupesController::class, 'contribuer']);
+        Route::get('/{uuid}/mouvements',     [MesGroupesController::class, 'mouvements']);
+
+        Route::post('/{uuid}/entrees-cash',                      [MesGroupesController::class, 'storeEntreeCash']);
+        Route::post('/{uuid}/entrees-cash/{entreeUuid}/annuler', [MesGroupesController::class, 'annulerEntreeCash']);
+
+        // Routes statiques (/beneficiaire) AVANT /{retraitUuid}.
+        Route::get('/{uuid}/retraits/beneficiaire',  [MesGroupesController::class, 'showBeneficiaire']);
+        Route::post('/{uuid}/retraits/beneficiaire', [MesGroupesController::class, 'storeBeneficiaire']);
+        Route::post('/{uuid}/retraits',              [MesGroupesController::class, 'retirer']);
+        Route::post('/{uuid}/retraits/{retraitUuid}/recheck', [MesGroupesController::class, 'recheckRetrait']);
+    });
 
     // =========================================================================
     // CLIENT TRANSACTIONS (« Mes transactions » — toutes les opérations

@@ -36,7 +36,13 @@ class UpdateUserRequest extends FormRequest
             'villeId'           => ['nullable', 'integer', 'exists:villes,id'],
             'groupeIds'         => ['nullable', 'array'],
             'groupeIds.*'       => ['integer', 'exists:groupes,id'],
-            'groupePrincipalId' => ['nullable', 'integer', 'exists:groupes,id'],
+            // Postes par groupe : [{id: 3, postes: ['president', 'tresorier']}] —
+            // postes vide = simple membre. `groupeIds` reste accepté (anciennes
+            // versions de l'app) : les postes déjà attribués sont conservés.
+            'groupes'           => ['nullable', 'array'],
+            'groupes.*.id'      => ['required', 'integer', 'exists:groupes,id'],
+            'groupes.*.postes'  => ['nullable', 'array'],
+            'groupes.*.postes.*' => ['string', Rule::in(\App\Models\Groupe::POSTES)],
         ];
     }
 

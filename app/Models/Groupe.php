@@ -11,11 +11,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * Modèle Groupe — Groupe/ministère de l'église (ex. Chorale, Jeunesse),
  * géré par le pasteur/la secrétaire. Un utilisateur peut appartenir à
- * plusieurs groupes, dont un seul "principal" (users.groupePrincipalId).
+ * plusieurs groupes, avec un poste dans chacun : président, trésorier (les
+ * deux cumulables) ou simple membre (aucun des deux).
+ *
+ * Un groupe ayant des mouvements d'argent ne se supprime plus : il est
+ * archivé (`archivedAt`) et disparaît des listes, historique conservé.
  */
 class Groupe extends Model
 {
     use HasFactory;
+
+    public const POSTE_PRESIDENT = 'president';
+    public const POSTE_TRESORIER = 'tresorier';
+    public const POSTES = [self::POSTE_PRESIDENT, self::POSTE_TRESORIER];
 
     protected $table = 'groupes';
 
@@ -24,7 +32,13 @@ class Groupe extends Model
         'churchId',
         'nom',
         'createdBy',
+        'archivedAt',
     ];
+
+    protected function casts(): array
+    {
+        return ['archivedAt' => 'datetime'];
+    }
 
     public function church(): BelongsTo
     {
@@ -38,11 +52,32 @@ class Groupe extends Model
 
     public function membres(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'groupe_user', 'groupeId', 'userId');
+        return $this->belongsToMany(User::class, 'groupe_user', 'groupeId', 'userId')
+            ->withPivot(['estPresident', 'estTresorier']);
     }
 
-    public function membresPrincipal(): HasMany
+    public function communiques(): HasMany
     {
-        return $this->hasMany(User::class, 'groupePrincipalId');
+        return $this->hasMany(GroupeCommunique::class, 'groupeId');
+    }
+
+    public function entreesCash(): HasMany
+    {
+        return $this->hasMany(GroupeEntreeCash::class, 'groupeId');
+    }
+
+    public function contributionsRecues(): HasMany
+    {
+        return $this->hasMany(Contribution::class, 'groupeCollecteId');
+    }
+
+    public function retraits(): HasMany
+    {
+        return $this->hasMany(Retrait::class, 'groupeId');
+    }
+
+    public function estArchive(): bool
+    {
+        return $this->archivedAt !== null;
     }
 }

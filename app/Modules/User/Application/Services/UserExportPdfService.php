@@ -21,7 +21,7 @@ class UserExportPdfService
      */
     public function generate(User $authUser): DomPdf
     {
-        $membres = User::with(['groupePrincipal', 'quartier', 'church'])
+        $membres = User::with(['groupes', 'quartier', 'church'])
             ->where('churchId', $authUser->churchId)
             ->orderBy('nom')
             ->get();

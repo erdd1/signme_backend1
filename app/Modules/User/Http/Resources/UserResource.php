@@ -51,14 +51,15 @@ class UserResource extends JsonResource
                 'estDiaspora' => $this->ville->estDiaspora,
             ] : null),
 
-            'groupePrincipal' => $this->whenLoaded('groupePrincipal', fn () => $this->groupePrincipal ? [
-                'id'  => $this->groupePrincipal->id,
-                'nom' => $this->groupePrincipal->nom,
-            ] : null),
-
+            // Poste dans chaque groupe : [] = simple membre, sinon 'president'
+            // et/ou 'tresorier' (sans rapport avec le rôle `role`).
             'groupes' => $this->whenLoaded('groupes', fn () => $this->groupes->map(fn ($g) => [
-                'id'  => $g->id,
-                'nom' => $g->nom,
+                'id'     => $g->id,
+                'nom'    => $g->nom,
+                'postes' => array_values(array_filter([
+                    $g->pivot->estPresident ? \App\Models\Groupe::POSTE_PRESIDENT : null,
+                    $g->pivot->estTresorier ? \App\Models\Groupe::POSTE_TRESORIER : null,
+                ])),
             ])->values()),
 
             'church' => $this->whenLoaded('church', fn () => $this->church ? [

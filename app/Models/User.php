@@ -35,7 +35,6 @@ use Laravel\Sanctum\HasApiTokens;
  * @property \Carbon\Carbon|null $dateNaissance
  * @property int|null         $quartierResidenceId
  * @property int|null         $villeResidenceId
- * @property int|null         $groupePrincipalId
  * @property \Carbon\Carbon|null $last_read_historique_at              Dernière visite onglet Historique
  * @property \Carbon\Carbon|null $last_read_historique_signatures_at   Dernière visite onglet Historique Signatures
  * @property \Carbon\Carbon|null $last_read_evenements_at              Dernière visite du fil d'actualité (badge Événements)
@@ -115,7 +114,6 @@ use Laravel\Sanctum\HasApiTokens;
         'dateNaissance',
         'quartierResidenceId',
         'villeResidenceId',
-        'groupePrincipalId',
         // ─── Badges de lecture ────────────────────────────────────────────
         'last_read_historique_at',
         'last_read_historique_signatures_at',
@@ -162,14 +160,15 @@ use Laravel\Sanctum\HasApiTokens;
         return $this->belongsTo(Ville::class, 'villeResidenceId');
     }
 
-    public function groupePrincipal(): BelongsTo
-    {
-        return $this->belongsTo(Groupe::class, 'groupePrincipalId');
-    }
-
+    /**
+     * Groupes du membre, avec son poste dans chacun (pivot estPresident /
+     * estTresorier — aucun des deux = simple membre). Sans rapport avec
+     * `users.role`.
+     */
     public function groupes(): BelongsToMany
     {
-        return $this->belongsToMany(Groupe::class, 'groupe_user', 'userId', 'groupeId');
+        return $this->belongsToMany(Groupe::class, 'groupe_user', 'userId', 'groupeId')
+            ->withPivot(['estPresident', 'estTresorier']);
     }
 
     public function signatures(): HasMany

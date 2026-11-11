@@ -7,6 +7,8 @@ use App\Core\Helpers\DbCompat;
 use App\Core\Services\PaymentQueueHealthService;
 use App\Models\Contribution;
 use App\Models\Evenement;
+use App\Models\Groupe;
+use App\Models\GroupeCommunique;
 use App\Models\PaymentEvent;
 use App\Models\User;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
@@ -83,6 +85,58 @@ class ContributionService
             );
         }
 
+        // Groupe du contributeur : dérivé automatiquement si l'utilisateur n'a
+        // qu'un seul groupe, sélection obligatoire s'il en a plusieurs.
+        $groupeId = $this->resolveGroupeId($user, isset($data['groupeId']) ? (int) $data['groupeId'] : null);
+
+        return $this->launchPayment(
+            $user,
+            $data,
+            ['evenementId' => $evenement->id, 'groupeId' => $groupeId],
+            "Contribution EEC - {$evenement->titre} - {$user->nom}",
+            $isCard,
+        );
+    }
+
+    /**
+     * Initie une contribution ou un don À UN GROUPE (caisse du groupe) :
+     * même circuit de paiement qu'une contribution d'événement, mais aucun
+     * événement n'est lié — l'argent n'entre donc jamais dans la trésorerie
+     * de l'église. `$communique` null = don libre au groupe.
+     *
+     * @throws ApiException
+     */
+    public function initiateForGroupe(User $user, Groupe $groupe, ?GroupeCommunique $communique, array $data): Contribution
+    {
+        $this->paymentQueueHealthService->ensureAvailable();
+
+        $isCard = $data['paymentMethod'] === Contribution::METHOD_CARD;
+        if ($isCard && !config('payment.card.enabled')) {
+            throw ApiException::serviceUnavailable('Le paiement par carte n\'est pas disponible pour le moment.');
+        }
+
+        $titre = $communique?->titre ?? 'Don libre';
+
+        return $this->launchPayment(
+            $user,
+            $data,
+            ['groupeCollecteId' => $groupe->id, 'communiqueId' => $communique?->id],
+            "Groupe {$groupe->nom} - {$titre} - {$user->nom}",
+            $isCard,
+        );
+    }
+
+    /**
+     * Cœur commun : crée la contribution (frais recalculés côté serveur) et
+     * lance le paiement Mobile Money ou carte. `$target` porte la destination
+     * (événement de l'église OU groupe), le reste du circuit est identique.
+     *
+     * @param array<string, int|null> $target colonnes de destination de la contribution
+     */
+    private function launchPayment(User $user, array $data, array $target, string $description, bool $isCard): Contribution
+    {
+        $paymentMethod = $data['paymentMethod'];
+
         $dejaEnCours = Contribution::where('userId', $user->id)
             ->where('statut', Contribution::STATUT_PENDING)
             ->exists();
@@ -102,19 +156,13 @@ class ContributionService
 
         $note = isset($data['note']) ? mb_substr((string) $data['note'], 0, 100) : null;
 
-        // Groupe du contributeur : dérivé automatiquement si l'utilisateur n'a
-        // qu'un seul groupe, sélection obligatoire s'il en a plusieurs.
-        $groupeId = $this->resolveGroupeId($user, isset($data['groupeId']) ? (int) $data['groupeId'] : null);
-
         $paymentOperator = $isCard ? null : ($data['paymentOperator'] ?? null);
         $paymentNumber = $isCard ? null : ($data['paymentNumber'] ?? null);
 
-        return DB::transaction(function () use ($user, $evenement, $montant, $feeData, $paymentMethod, $paymentOperator, $paymentNumber, $note, $groupeId, $isCard) {
-            $contribution = Contribution::create([
+        return DB::transaction(function () use ($user, $target, $description, $montant, $feeData, $paymentMethod, $paymentOperator, $paymentNumber, $note, $isCard) {
+            $contribution = Contribution::create($target + [
                 'uuid'            => (string) Str::uuid(),
-                'evenementId'     => $evenement->id,
                 'userId'          => $user->id,
-                'groupeId'        => $groupeId,
                 'montant'         => $montant,
                 'frais'           => $feeData['frais'],
                 'montantTotal'    => $feeData['total'],
@@ -133,8 +181,6 @@ class ContributionService
                 'pending',
                 ['montant' => $montant, 'montantTotal' => $feeData['total']],
             );
-
-            $description = "Contribution EEC - {$evenement->titre} - {$user->nom}";
 
             try {
                 $paymentRef = $isCard
@@ -162,7 +208,8 @@ class ContributionService
 
                 Log::info('Contribution événement — paiement NotchPay lancé', [
                     'contribution_id'   => $contribution->id,
-                    'evenement_id'      => $evenement->id,
+                    'evenement_id'      => $target['evenementId'] ?? null,
+                    'groupe_collecte_id' => $target['groupeCollecteId'] ?? null,
                     'payment_reference' => $paymentRef,
                     'paymentMethod'     => $paymentMethod,
                 ]);
@@ -273,7 +320,9 @@ class ContributionService
                 'confirmed_at'     => $internalStatus === Contribution::STATUT_COMPLETED ? now() : null,
             ]);
 
-            if ($internalStatus === Contribution::STATUT_COMPLETED) {
+            // Contribution de groupe (aucun événement) : la caisse du groupe est
+            // calculée à la lecture depuis les contributions complétées.
+            if ($internalStatus === Contribution::STATUT_COMPLETED && $contribution->evenementId !== null) {
                 Evenement::where('id', $contribution->evenementId)->increment('montantCollecte', $contribution->montant);
                 Evenement::where('id', $contribution->evenementId)->increment('nombreContributions');
 
@@ -413,7 +462,9 @@ class ContributionService
      */
     public function listAllForTreasury(User $authUser, int $perPage = 20, ?string $statut = null): LengthAwarePaginator
     {
-        $query = Contribution::query()->with(['user', 'evenement']);
+        // Les contributions de groupe (sans événement) ne font pas partie de la
+        // trésorerie de l'église, y compris pour l'admin.
+        $query = Contribution::query()->whereNotNull('evenementId')->with(['user', 'evenement']);
 
         if (!$authUser->isAdmin()) {
             $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));
@@ -473,7 +524,9 @@ class ContributionService
      */
     private function buildTreasuryQuery(User $authUser, array $filters = [])
     {
-        $query = Contribution::query()->where('statut', Contribution::STATUT_COMPLETED);
+        $query = Contribution::query()
+            ->whereNotNull('evenementId')
+            ->where('statut', Contribution::STATUT_COMPLETED);
 
         if (!$authUser->isAdmin()) {
             $query->whereHas('evenement', fn ($q) => $q->where('churchId', $authUser->churchId));

@@ -26,6 +26,8 @@ use App\Modules\Evenement\Application\Services\EvenementService;
 use App\Modules\Evenement\Application\Services\ContributionService;
 use App\Modules\Evenement\Application\Services\ContributionPollingDispatcher;
 use App\Modules\Evenement\Application\Services\MesContributionsService;
+use App\Modules\Groupe\Application\Services\GroupeCaisseService;
+use App\Modules\Groupe\Application\Services\GroupeMembershipService;
 use App\Modules\UserLookup\Application\Services\GroupeService;
 use App\Modules\UserLookup\Application\Services\QuartierService;
 use App\Modules\UserLookup\Application\Services\VilleService;
@@ -119,7 +121,8 @@ class AppServiceProvider extends ServiceProvider
         // ─── Module User ──────────────────────────────────────────────────────
         $this->app->singleton(UserService::class, function ($app) {
             return new UserService(
-                $app->make(ImageStorageService::class)
+                $app->make(ImageStorageService::class),
+                $app->make(GroupeMembershipService::class),
             );
         });
 
@@ -217,6 +220,7 @@ class AppServiceProvider extends ServiceProvider
             return new RetraitService(
                 $app->make(SortieFinanciereService::class),
                 $app->make(NotchPayGateway::class),
+                $app->make(GroupeCaisseService::class),
             );
         });
     }

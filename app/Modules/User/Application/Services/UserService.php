@@ -10,6 +10,7 @@ use App\Models\Ville;
 use App\Core\Exceptions\ApiException;
 use App\Core\Helpers\DbCompat;
 use App\Core\Services\ImageStorageService;
+use App\Modules\Groupe\Application\Services\GroupeMembershipService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
@@ -33,10 +34,11 @@ class UserService
     private const ROLES_PASTEUR = ['secretaire', 'tresorier', 'ancien', 'paroissien'];
 
     /** Relations chargées systématiquement pour la sérialisation (UserResource) */
-    private const RELATIONS = ['church', 'quartier', 'ville', 'groupePrincipal', 'groupes'];
+    private const RELATIONS = ['church', 'quartier', 'ville', 'groupes'];
 
     public function __construct(
-        private readonly ImageStorageService $imageStorageService
+        private readonly ImageStorageService $imageStorageService,
+        private readonly GroupeMembershipService $groupeMembership,
     ) {}
 
     /**
@@ -129,8 +131,8 @@ class UserService
             throw ApiException::conflict("Un compte avec l'email \"{$data['email']}\" existe déjà.");
         }
 
-        $groupeIds = $data['groupeIds'] ?? [];
-        $groupePrincipalId = $data['groupePrincipalId'] ?? null;
+        $groupeMap = $this->groupeMembership->extractMap($data) ?? [];
+        $groupeIds = array_keys($groupeMap);
 
         if ($churchId) {
             $this->assertLookupsBelongToChurch(
@@ -140,7 +142,6 @@ class UserService
                 $groupeIds
             );
         }
-        $this->assertGroupePrincipalCoherent($groupeIds, $groupePrincipalId);
         $this->assertMatriculeValidForChurch($churchId, $data['matricule'] ?? null, $data['sexe'] ?? null);
         $estCommuniant = $this->resolveCommuniantForCreate($data['role'], $data);
 
@@ -151,7 +152,7 @@ class UserService
         // se contente ici de transformer cette violation en message propre
         // au lieu de laisser remonter une erreur 500 brute.
         try {
-            $user = DB::transaction(function () use ($data, $churchId, $groupeIds, $groupePrincipalId, $estCommuniant) {
+            $user = DB::transaction(function () use ($data, $churchId, $groupeMap, $estCommuniant) {
                 // 'role' est NOT NULL sans défaut en base : il doit être posé
                 // AVANT le premier save() (pas d'INSERT intermédiaire sans lui).
                 $user = new User([
@@ -169,7 +170,6 @@ class UserService
                     'dateNaissance'       => $data['dateNaissance'] ?? null,
                     'quartierResidenceId' => $data['quartierId'] ?? null,
                     'villeResidenceId'    => $data['villeId'] ?? null,
-                    'groupePrincipalId'   => $groupePrincipalId,
                 ]);
 
                 // Champs sensibles : assignation explicite (non mass-assignable).
@@ -179,8 +179,8 @@ class UserService
                 $user->estCommuniant = $estCommuniant;
                 $user->save();
 
-                if (!empty($groupeIds)) {
-                    $user->groupes()->sync($groupeIds);
+                if (!empty($groupeMap)) {
+                    $this->groupeMembership->sync($user, $groupeMap);
                 }
 
                 return $user;
@@ -287,23 +287,17 @@ class UserService
 
         $churchId = $user->churchId;
 
-        // ─── Groupes multiples : null = "non fourni" (inchangé), [] = "vider" ──
-        $groupeIds = array_key_exists('groupeIds', $data) ? ($data['groupeIds'] ?? []) : null;
-        $groupePrincipalId = array_key_exists('groupePrincipalId', $data)
-            ? $data['groupePrincipalId']
-            : $user->groupePrincipalId;
-
-        $effectiveGroupeIds = $groupeIds ?? $user->groupes()->pluck('groupes.id')->toArray();
+        // ─── Groupes : null = "non fourni" (inchangé), [] = "vider" ───────────
+        $groupeMap = $this->groupeMembership->extractMap($data);
 
         if ($churchId) {
             $this->assertLookupsBelongToChurch(
                 $churchId,
                 array_key_exists('quartierId', $data) ? $data['quartierId'] : null,
                 array_key_exists('villeId', $data) ? $data['villeId'] : null,
-                $groupeIds ?? []
+                $groupeMap === null ? [] : array_keys($groupeMap)
             );
         }
-        $this->assertGroupePrincipalCoherent($effectiveGroupeIds, $groupePrincipalId);
 
         $updateData = array_filter([
             'nom'               => $data['nom']               ?? null,
@@ -335,10 +329,6 @@ class UserService
             $updateData['matricule'] = $data['matricule'];
         }
 
-        if (array_key_exists('groupePrincipalId', $data) || $groupeIds !== null) {
-            $updateData['groupePrincipalId'] = $groupePrincipalId;
-        }
-
         // Changement mots de passe si fourni
         if (!empty($data['password'])) {
             $updateData['password'] = $data['password'];
@@ -356,7 +346,7 @@ class UserService
             DB::transaction(function () use (
                 $user,
                 $updateData,
-                $groupeIds,
+                $groupeMap,
                 $newRole,
                 $resolvedEstCommuniant,
                 $resolvedCommuniantDepuis,
@@ -376,8 +366,8 @@ class UserService
                     $user->save();
                 }
 
-                if ($groupeIds !== null) {
-                    $user->groupes()->sync($groupeIds);
+                if ($groupeMap !== null) {
+                    $this->groupeMembership->sync($user, $groupeMap);
                 }
             });
         } catch (\Illuminate\Database\QueryException $e) {
@@ -644,23 +634,6 @@ class UserService
             if ($count !== count($uniqueIds)) {
                 throw ApiException::badRequest('Un ou plusieurs groupes sélectionnés n\'appartiennent pas à votre église.');
             }
-        }
-    }
-
-    /**
-     * Le groupe principal doit obligatoirement faire partie des groupes
-     * sélectionnés par le membre.
-     *
-     * @throws ApiException
-     */
-    private function assertGroupePrincipalCoherent(array $groupeIds, ?int $groupePrincipalId): void
-    {
-        if ($groupePrincipalId === null) {
-            return;
-        }
-
-        if (empty($groupeIds) || !in_array($groupePrincipalId, $groupeIds, true)) {
-            throw ApiException::badRequest('Le groupe principal doit faire partie des groupes sélectionnés.');
         }
     }
 

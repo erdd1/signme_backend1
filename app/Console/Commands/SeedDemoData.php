@@ -198,7 +198,6 @@ class SeedDemoData extends Command
             }
             if (!empty($groupeIds) && fake()->boolean(60)) {
                 $groupeId = $groupeIds[array_rand($groupeIds)];
-                $update['groupePrincipalId'] = $groupeId;
             }
             if ($update !== []) {
                 $user->update($update);

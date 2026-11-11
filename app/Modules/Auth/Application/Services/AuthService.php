@@ -436,7 +436,7 @@ class AuthService
      */
     public function me(User $user): array
     {
-        $user->load(['church', 'quartier', 'ville', 'groupePrincipal', 'groupes']);
+        $user->load(['church', 'quartier', 'ville', 'groupes']);
 
         return (new UserResource($user))->resolve();
     }

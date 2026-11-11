@@ -39,7 +39,6 @@ class UserDemographicsTest extends TestCase
                 'quartierId' => $quartier->id,
                 'villeId' => $ville->id,
                 'groupeIds' => [$groupe1->id, $groupe2->id],
-                'groupePrincipalId' => $groupe1->id,
             ]);
 
         $response->assertStatus(201);
@@ -50,13 +49,12 @@ class UserDemographicsTest extends TestCase
         $this->assertSame('Centre', $user->originaireDe);
         $this->assertSame($quartier->id, $user->quartierResidenceId);
         $this->assertSame($ville->id, $user->villeResidenceId);
-        $this->assertSame($groupe1->id, $user->groupePrincipalId);
         $this->assertCount(2, $user->groupes);
 
         $response->assertJsonPath('data.sexe', 'homme');
         $response->assertJsonPath('data.quartier.id', $quartier->id);
         $response->assertJsonPath('data.ville.estDiaspora', false);
-        $response->assertJsonPath('data.groupePrincipal.id', $groupe1->id);
+        $response->assertJsonMissingPath('data.groupePrincipal');
     }
 
     public function test_originaire_de_must_be_a_valid_region(): void
@@ -75,28 +73,6 @@ class UserDemographicsTest extends TestCase
             ]);
 
         $response->assertStatus(422);
-    }
-
-    public function test_groupe_principal_must_be_among_selected_groupes(): void
-    {
-        $church = Church::factory()->create();
-        $pasteur = User::factory()->create(['role' => User::ROLE_PASTEUR, 'churchId' => $church->id]);
-        $groupe1 = Groupe::factory()->create(['churchId' => $church->id]);
-        $groupeAutre = Groupe::factory()->create(['churchId' => $church->id]);
-        $token = $pasteur->createToken('test')->plainTextToken;
-
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-            ->postJson('/api/v1/users', [
-                'nom' => 'Jean Dupont',
-                'email' => 'jean.groupe@test.com',
-                'password' => 'Password123',
-                'role' => User::ROLE_PAROISSIEN,
-                'estCommuniant' => true,
-                'groupeIds' => [$groupe1->id],
-                'groupePrincipalId' => $groupeAutre->id,
-            ]);
-
-        $response->assertStatus(400);
     }
 
     public function test_cannot_assign_quartier_from_another_church(): void
@@ -120,7 +96,7 @@ class UserDemographicsTest extends TestCase
         $response->assertStatus(400);
     }
 
-    public function test_update_can_change_groupe_principal_and_resync_groupes(): void
+    public function test_update_resyncs_groupes(): void
     {
         $church = Church::factory()->create();
         $pasteur = User::factory()->create(['role' => User::ROLE_PASTEUR, 'churchId' => $church->id]);
@@ -129,20 +105,17 @@ class UserDemographicsTest extends TestCase
 
         $membre = User::factory()->create(['role' => User::ROLE_PAROISSIEN, 'churchId' => $church->id]);
         $membre->groupes()->attach($groupe1->id);
-        $membre->update(['groupePrincipalId' => $groupe1->id]);
 
         $token = $pasteur->createToken('test')->plainTextToken;
 
         $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->putJson("/api/v1/users/{$membre->id}", [
                 'groupeIds' => [$groupe2->id],
-                'groupePrincipalId' => $groupe2->id,
             ]);
 
         $response->assertStatus(200);
 
         $membre->refresh();
-        $this->assertSame($groupe2->id, $membre->groupePrincipalId);
         $this->assertCount(1, $membre->groupes);
         $this->assertSame($groupe2->id, $membre->groupes->first()->id);
     }

@@ -41,7 +41,13 @@ class CreateUserRequest extends FormRequest
             'villeId'           => ['nullable', 'integer', 'exists:villes,id'],
             'groupeIds'         => ['nullable', 'array'],
             'groupeIds.*'       => ['integer', 'exists:groupes,id'],
-            'groupePrincipalId' => ['nullable', 'integer', 'exists:groupes,id'],
+            // Postes par groupe : [{id: 3, postes: ['president', 'tresorier']}] —
+            // postes vide = simple membre. `groupeIds` reste accepté (anciennes
+            // versions de l'app) : les postes déjà attribués sont conservés.
+            'groupes'           => ['nullable', 'array'],
+            'groupes.*.id'      => ['required', 'integer', 'exists:groupes,id'],
+            'groupes.*.postes'  => ['nullable', 'array'],
+            'groupes.*.postes.*' => ['string', Rule::in(\App\Models\Groupe::POSTES)],
         ];
     }
 
@@ -64,7 +70,8 @@ class CreateUserRequest extends FormRequest
             'quartierId.exists'     => 'Ce quartier n\'existe pas.',
             'villeId.exists'        => 'Cette ville n\'existe pas.',
             'groupeIds.*.exists'    => 'Un des groupes sélectionnés n\'existe pas.',
-            'groupePrincipalId.exists' => 'Le groupe principal sélectionné n\'existe pas.',
+            'groupes.*.id.exists'   => 'Un des groupes sélectionnés n\'existe pas.',
+            'groupes.*.postes.*.in' => 'Poste invalide : président ou trésorier.',
         ];
     }
 

@@ -111,7 +111,7 @@ class UserLookupsTest extends TestCase
         $this->assertDatabaseMissing('groupes', ['id' => $groupe->id]);
     }
 
-    public function test_deleting_groupe_nulls_membre_reference_instead_of_failing(): void
+    public function test_deleting_groupe_removes_membership_links_instead_of_failing(): void
     {
         $church = Church::factory()->create();
         $groupe = Groupe::factory()->create(['churchId' => $church->id]);
@@ -119,7 +119,6 @@ class UserLookupsTest extends TestCase
         $membre = User::factory()->create([
             'role' => User::ROLE_PAROISSIEN,
             'churchId' => $church->id,
-            'groupePrincipalId' => $groupe->id,
         ]);
         $membre->groupes()->attach($groupe->id);
 
@@ -130,7 +129,7 @@ class UserLookupsTest extends TestCase
             ->deleteJson("/api/v1/groupes/{$groupe->id}");
 
         $response->assertStatus(200);
-        $this->assertDatabaseHas('users', ['id' => $membre->id, 'groupePrincipalId' => null]);
+        $this->assertDatabaseHas('users', ['id' => $membre->id]);
         $this->assertDatabaseMissing('groupe_user', ['groupeId' => $groupe->id]);
     }
 

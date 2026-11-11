@@ -40,6 +40,8 @@ class Contribution extends Model
         'evenementId',
         'userId',
         'groupeId',
+        'groupeCollecteId',
+        'communiqueId',
         'montant',
         'frais',
         'montantTotal',
@@ -76,6 +78,17 @@ class Contribution extends Model
     public function groupe(): BelongsTo
     {
         return $this->belongsTo(Groupe::class, 'groupeId');
+    }
+
+    /** Groupe DESTINATAIRE de l'argent (caisse de groupe) — distinct de `groupe`. */
+    public function groupeCollecte(): BelongsTo
+    {
+        return $this->belongsTo(Groupe::class, 'groupeCollecteId');
+    }
+
+    public function communique(): BelongsTo
+    {
+        return $this->belongsTo(GroupeCommunique::class, 'communiqueId');
     }
 
     public function estVisibleNotePar(User $user): bool

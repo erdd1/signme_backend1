@@ -18,6 +18,7 @@ class RetraitResource extends JsonResource
             'statut'          => $this->statut,
             'reference'       => $this->reference,
             'motifEchec'      => $this->motif_echec,
+            'motif'           => $this->motif,
             'soldeApres'      => $this->solde_apres,
             'beneficiaire'    => $this->beneficiaire ? [
                 'operator'     => $this->beneficiaire->operatorLabel(),

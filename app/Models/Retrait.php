@@ -17,6 +17,7 @@ class Retrait extends Model
 
     protected $fillable = [
         'churchId',
+        'groupeId',
         'userId',
         'retrait_beneficiaire_id',
         'montant_demande',
@@ -27,6 +28,7 @@ class Retrait extends Model
         'notchpay_transfer_id',
         'notchpay_status',
         'motif_echec',
+        'motif',
         'solde_apres',
         'completed_at',
     ];
@@ -50,6 +52,12 @@ class Retrait extends Model
     public function church(): BelongsTo
     {
         return $this->belongsTo(Church::class, 'churchId');
+    }
+
+    /** Groupe dont la caisse est débitée (retrait de groupe : pas d'église). */
+    public function groupe(): BelongsTo
+    {
+        return $this->belongsTo(Groupe::class, 'groupeId');
     }
 
     public function auteur(): BelongsTo

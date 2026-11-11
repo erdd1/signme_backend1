@@ -64,20 +64,25 @@ class TransactionService
     private function contributions(User $user): Collection
     {
         return Contribution::where('userId', $user->id)
-            ->with('evenement.church')
+            ->with(['evenement.church', 'groupeCollecte.church', 'communique'])
             ->orderByDesc('created_at')
             ->limit(self::MAX_PAR_SOURCE)
             ->get()
             ->map(function (Contribution $c) {
-                $don = $c->evenement?->type === Evenement::TYPE_DON_LIBRE;
+                $groupe = $c->groupeCollecte;
+                $don = $groupe !== null
+                    ? $c->communique === null
+                    : $c->evenement?->type === Evenement::TYPE_DON_LIBRE;
                 $card = $c->payment_metadata['card'] ?? null;
 
                 return $this->transaction(
                     id: "contribution:{$c->uuid}",
                     type: $don ? self::TYPE_DON : self::TYPE_CONTRIBUTION,
-                    motif: $don ? 'Don à l\'église' : 'Contribution — ' . ($c->evenement?->titre ?? 'Événement'),
+                    motif: $groupe !== null
+                        ? ($don ? "Don au groupe {$groupe->nom}" : "Groupe {$groupe->nom} — " . ($c->communique?->titre ?? 'Contribution'))
+                        : ($don ? 'Don à l\'église' : 'Contribution — ' . ($c->evenement?->titre ?? 'Événement')),
                     details: [],
-                    eglise: $c->evenement?->church?->nom,
+                    eglise: $groupe?->church?->nom ?? $c->evenement?->church?->nom,
                     montant: $c->montant,
                     frais: $c->frais,
                     total: $c->montantTotal,

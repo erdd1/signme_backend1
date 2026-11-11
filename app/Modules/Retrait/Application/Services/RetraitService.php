@@ -3,10 +3,12 @@
 namespace App\Modules\Retrait\Application\Services;
 
 use App\Core\Exceptions\ApiException;
+use App\Models\Groupe;
 use App\Models\Retrait;
 use App\Models\RetraitBeneficiaire;
 use App\Models\RetraitEvent;
 use App\Models\User;
+use App\Modules\Groupe\Application\Services\GroupeCaisseService;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use App\Modules\Tresorerie\Application\Services\SortieFinanciereService;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -27,6 +29,7 @@ class RetraitService
     public function __construct(
         private SortieFinanciereService $sortieFinanciereService,
         private NotchPayGateway $notchPayGateway,
+        private GroupeCaisseService $groupeCaisseService,
     ) {}
 
     /** Solde interne actuellement disponible pour l'église de l'utilisateur. */
@@ -135,6 +138,69 @@ class RetraitService
     }
 
     /**
+     * Retrait de la CAISSE D'UN GROUPE (président ou trésorier, vérifié par
+     * l'appelant) : même circuit que le retrait d'église (frais, bénéficiaire,
+     * Transfer NotchPay, webhook, revérification), mais débité du seul solde
+     * en ligne du groupe et SANS église (`churchId` null) — il n'entre jamais
+     * dans les calculs de trésorerie de l'église. Motif obligatoire.
+     */
+    public function initiateRetraitGroupe(User $authUser, Groupe $groupe, int $montantDemande, string $motif): Retrait
+    {
+        $montantMin = (int) config('payment.retrait.montant_min', 1000);
+        if ($montantDemande < $montantMin) {
+            throw ApiException::badRequest("Le montant minimum de retrait est de {$montantMin} FCFA.");
+        }
+
+        $motif = trim($motif);
+        if ($motif === '') {
+            throw ApiException::badRequest('Le motif du retrait est obligatoire.');
+        }
+
+        $beneficiaire = $this->getBeneficiaireActif($authUser);
+        if (!$beneficiaire) {
+            throw ApiException::badRequest(
+                "Aucun compte de retrait enregistré. Enregistrez d'abord votre numéro Orange Money/MTN Mobile Money."
+            );
+        }
+
+        $calcul = RetraitFeeCalculatorService::calculate($montantDemande);
+
+        $lock = Cache::lock("retrait:groupe:{$groupe->id}", 10);
+
+        $retrait = $lock->block(5, function () use ($authUser, $groupe, $beneficiaire, $calcul, $motif) {
+            $solde = $this->groupeCaisseService->soldeRetirable($groupe);
+            if ($calcul['montant_demande'] > $solde) {
+                throw ApiException::badRequest("Solde insuffisant. Solde disponible : {$solde} FCFA.");
+            }
+
+            $retrait = Retrait::create([
+                'churchId'                => null,
+                'groupeId'                => $groupe->id,
+                'userId'                  => $authUser->id,
+                'retrait_beneficiaire_id' => $beneficiaire->id,
+                'montant_demande'         => $calcul['montant_demande'],
+                'frais'                   => $calcul['frais'],
+                'montant_net'             => $calcul['montant_net'],
+                'statut'                  => Retrait::STATUT_PENDING,
+                'reference'               => 'RETRAIT-G' . $groupe->id . '-' . now()->timestamp . '-' . Str::random(6),
+                'motif'                   => mb_substr($motif, 0, 255),
+                'solde_apres'             => max(0, $solde - $calcul['montant_demande']),
+            ]);
+
+            RetraitEventRecorder::recordEvent(
+                $retrait->id,
+                RetraitEvent::TYPE_CREATED,
+                Retrait::STATUT_PENDING,
+                ['montant_demande' => $calcul['montant_demande'], 'frais' => $calcul['frais'], 'groupe' => $groupe->id],
+            );
+
+            return $retrait;
+        });
+
+        return $this->sendToGateway($retrait, $beneficiaire);
+    }
+
+    /**
      * Envoie le retrait à NotchPay. En cas d'échec immédiat (réseau, refus
      * API), le retrait est marqué `failed` — le solde interne le libère
      * automatiquement (getDashboardStats exclut les retraits `failed`).
@@ -145,7 +211,7 @@ class RetraitService
             $transfer = $this->notchPayGateway->initiateTransfer(
                 $beneficiaire->notchpay_beneficiary_id,
                 $retrait->montant_net,
-                "Retrait — {$beneficiaire->church->nom}",
+                "Retrait — " . ($retrait->groupe?->nom ?? $beneficiaire->church?->nom),
                 $retrait->reference,
             );
 
@@ -214,6 +280,19 @@ class RetraitService
         }
 
         return $retrait;
+    }
+
+    /** Retrait de la caisse d'un groupe, par UUID. */
+    public function findByUuidForGroupe(string $uuid, Groupe $groupe): Retrait
+    {
+        if (!Str::isUuid($uuid)) {
+            throw ApiException::notFound('Retrait');
+        }
+
+        return Retrait::with(['beneficiaire', 'auteur:id,nom'])
+            ->where('uuid', $uuid)
+            ->where('groupeId', $groupe->id)
+            ->first() ?? throw ApiException::notFound('Retrait');
     }
 
     /**
