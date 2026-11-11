@@ -45,6 +45,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Paiement par carte bancaire (Flutterwave)
+    |--------------------------------------------------------------------------
+    | `enabled` = interrupteur général (false : l'option carte disparaît de
+    | l'app et le serveur refuse tout paiement par carte).
+    | `fee_percent` : frais de carte retenus par le fournisseur, en % du total
+    | débité — à renseigner avec le taux réel du contrat marchand. Le fidèle
+    | paie ces frais en plus : l'église reçoit exactement le montant prévu.
+    */
+    'card' => [
+        'enabled'     => (bool) env('CARD_PAYMENTS_ENABLED', false),
+        'currency'    => env('CARD_PAYMENTS_CURRENCY', 'XAF'),
+        'fee_percent' => (float) env('FLUTTERWAVE_CARD_FEE_PERCENT', 4.8),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | NotchPay
     |--------------------------------------------------------------------------
     */

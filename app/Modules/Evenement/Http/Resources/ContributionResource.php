@@ -18,7 +18,7 @@ class ContributionResource extends JsonResource
         $authUser = $request->user();
         $peutVoirDetails = $authUser && $this->estVisibleNotePar($authUser);
 
-        return [
+        $data = [
             'uuid'            => $this->uuid,
             'montant'         => $this->montant,
             'frais'           => $this->frais,
@@ -43,6 +43,18 @@ class ContributionResource extends JsonResource
             ],
             'createdAt'       => $this->created_at?->toIso8601String(),
         ];
+
+        // Paiement par carte en cours : adresse de la page de paiement,
+        // réservée à son auteur (le lien n'est utile qu'à lui, tant que le
+        // paiement n'est pas terminé).
+        if ($authUser
+            && $authUser->id === $this->userId
+            && $this->paymentMethod === Contribution::METHOD_CARD
+            && $this->statut === Contribution::STATUT_PENDING) {
+            $data['checkoutUrl'] = $this->payment_metadata['checkout_url'] ?? null;
+        }
+
+        return $data;
     }
 
     private function maskPhoneNumber(string $phone): string

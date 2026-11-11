@@ -36,9 +36,11 @@ class CreateContributionRequest extends FormRequest
                 },
             ],
             'note'            => ['nullable', 'string', 'max:100'],
-            'paymentMethod'   => ['required', 'string', 'in:mobile_money'],
-            'paymentOperator' => ['required', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
-            'paymentNumber'   => ['required', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
+            // Carte bancaire : le fidèle saisit sa carte sur la page hébergée du
+            // fournisseur — ni opérateur ni numéro de téléphone à fournir.
+            'paymentMethod'   => ['required', 'string', 'in:mobile_money,card'],
+            'paymentOperator' => ['required_if:paymentMethod,mobile_money', 'nullable', 'string', 'in:ORANGE MONEY,MTN MOBILE MONEY'],
+            'paymentNumber'   => ['required_if:paymentMethod,mobile_money', 'nullable', 'string', 'regex:/^(?:6[0-9]{8}|237[0-9]{9})$/'],
             // Obligatoire seulement si l'utilisateur appartient à plusieurs
             // groupes (vérifié dans ContributionService, pas ici : la règle
             // dépend du nombre de groupes de l'utilisateur connecté).
@@ -52,10 +54,10 @@ class CreateContributionRequest extends FormRequest
             'montant.required'       => 'Le montant de la contribution est obligatoire.',
             'note.max'               => 'La note ne peut pas dépasser 100 caractères.',
             'paymentMethod.required' => 'La méthode de paiement est obligatoire.',
-            'paymentMethod.in'       => 'Méthode de paiement invalide. Seul le paiement Mobile Money est disponible.',
-            'paymentOperator.required' => 'L\'opérateur mobile money est obligatoire.',
+            'paymentMethod.in'       => 'Méthode de paiement invalide. Utilisez : mobile_money ou card.',
+            'paymentOperator.required_if' => 'L\'opérateur mobile money est obligatoire.',
             'paymentOperator.in'     => 'Opérateur invalide. Utilisez : ORANGE MONEY ou MTN MOBILE MONEY.',
-            'paymentNumber.required' => 'Le numéro de téléphone est obligatoire.',
+            'paymentNumber.required_if' => 'Le numéro de téléphone est obligatoire.',
             'paymentNumber.regex'    => 'Numéro invalide. Format attendu : 237699803165 ou 699803165.',
         ];
     }

@@ -20,6 +20,12 @@ class Contribution extends Model
     public const STATUT_COMPLETED = 'completed';
     public const STATUT_FAILED    = 'failed';
 
+    public const METHOD_MOBILE_MONEY = 'mobile_money';
+    public const METHOD_CARD         = 'card';
+
+    public const GATEWAY_NOTCHPAY    = 'notchpay';
+    public const GATEWAY_FLUTTERWAVE = 'flutterwave';
+
     public const STATUTS = [
         self::STATUT_PENDING,
         self::STATUT_COMPLETED,
@@ -28,8 +34,6 @@ class Contribution extends Model
 
     /** Rôles autorisés à voir la note et le détail complet d'une contribution */
     public const ROLES_GESTION_FINANCIERE = ['pasteur', 'secretaire', 'tresorier'];
-
-    public const METHOD_MOBILE_MONEY = 'mobile_money';
 
     protected $fillable = [
         'uuid',
@@ -43,6 +47,7 @@ class Contribution extends Model
         'paymentOperator',
         'paymentNumber',
         'paymentMethod',
+        'paymentGateway',
         'payment_reference',
         'statut',
         'payment_metadata',

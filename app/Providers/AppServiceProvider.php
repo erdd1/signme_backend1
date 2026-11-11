@@ -17,6 +17,8 @@ use App\Modules\Payment\Application\PaymentService;
 use App\Modules\Payment\Domain\PaymentRepositoryInterface;
 use App\Modules\Payment\Infrastructure\PaymentRepository;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
+use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
+use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use App\Modules\Publication\Application\Services\PublicationService;
 use App\Modules\AncienDesignation\Application\Services\AncienDesignationService;
 use App\Modules\Rapport\Application\Services\RapportService;
@@ -166,6 +168,8 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(NotchPayGateway::class),
                 $app->make(ContributionPollingDispatcher::class),
                 $app->make(PaymentQueueHealthService::class),
+                $app->make(FlutterwaveGateway::class),
+                $app->make(PaymentGatewayRegistry::class),
             );
         });
 
