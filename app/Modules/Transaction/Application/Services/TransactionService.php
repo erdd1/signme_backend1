@@ -17,7 +17,7 @@ use Illuminate\Support\Str;
  *
  * Sources agrégées (lecture seule, aucune donnée dupliquée) :
  * - contributions aux événements et dons libres (Mobile Money ou carte)
- * - paiements de signature / Sainte-Cène à distance (Mobile Money)
+ * - paiements de signature / Sainte-Cène à distance (Mobile Money ou carte)
  * - signatures en espèces remises à un ancien de service (une transaction
  *   par passage, tous les mois signés ensemble)
  *
@@ -113,10 +113,10 @@ class TransactionService
                     frais: $t->fees,
                     total: $t->amountCharged,
                     statut: $t->status,
-                    method: 'mobile_money',
+                    method: $t->paymentMethod === PaymentTransaction::METHOD_CARD ? 'card' : 'mobile_money',
                     operator: $t->paymentOperator,
                     number: $t->paymentNumber,
-                    card: null,
+                    card: $t->payment_metadata['card'] ?? null,
                     reference: $t->payment_reference,
                     createdAt: $t->created_at,
                 );

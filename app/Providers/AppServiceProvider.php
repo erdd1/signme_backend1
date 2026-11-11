@@ -139,6 +139,8 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(AncienDesignationService::class),
                 $app->make(\App\Modules\Payment\Application\Services\PaymentPollingDispatcher::class),
                 $app->make(PaymentQueueHealthService::class),
+                $app->make(FlutterwaveGateway::class),
+                $app->make(PaymentGatewayRegistry::class),
             );
         });
 

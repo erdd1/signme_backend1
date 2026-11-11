@@ -23,8 +23,8 @@ class PaymentEntity
     private Money $fees;
     private Money $amountCharged;
     private PaymentStatus $status;
-    private string $paymentOperator;      // ORANGE MONEY, MTN MOBILE MONEY
-    private string $paymentNumber;
+    private ?string $paymentOperator;     // ORANGE MONEY, MTN MOBILE MONEY (null : carte)
+    private ?string $paymentNumber;       // null : carte
     private string $signatureType;        // presentiel, distance
     private ?string $paymentReference;
     private array $paymentMetadata;
@@ -40,8 +40,8 @@ class PaymentEntity
         int $totalAmount,
         int $fees,
         int $amountCharged,
-        string $paymentOperator,
-        string $paymentNumber,
+        ?string $paymentOperator,
+        ?string $paymentNumber,
         string $signatureType,
         string $status = 'pending',
         ?string $paymentReference = null,
@@ -114,12 +114,12 @@ class PaymentEntity
         return $this->status;
     }
 
-    public function getPaymentOperator(): string
+    public function getPaymentOperator(): ?string
     {
         return $this->paymentOperator;
     }
 
-    public function getPaymentNumber(): string
+    public function getPaymentNumber(): ?string
     {
         return $this->paymentNumber;
     }

@@ -6,8 +6,10 @@ use App\Core\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Models\Contribution;
 use App\Models\PaymentEvent;
+use App\Models\PaymentTransaction;
 use App\Modules\Auth\Application\Services\RateLimitService;
 use App\Modules\Evenement\Application\Jobs\SyncEvenementContributionStatusJob;
+use App\Modules\Payment\Application\Jobs\SyncPaymentStatusJob;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
 use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
 use Illuminate\Http\JsonResponse;
@@ -59,23 +61,35 @@ class FlutterwaveWebhookController extends Controller
                 ->where('paymentGateway', Contribution::GATEWAY_FLUTTERWAVE)
                 ->first()
             : null;
+        $transaction = ($txRef && !$contribution)
+            ? PaymentTransaction::where('payment_reference', $txRef)
+                ->where('paymentGateway', PaymentTransaction::GATEWAY_FLUTTERWAVE)
+                ->first()
+            : null;
 
         // Toujours répondre 200 aux requêtes authentiques : Flutterwave réessaie
         // sinon indéfiniment, y compris pour des références qui ne nous concernent pas.
-        if (!$contribution) {
-            Log::info('[Flutterwave] webhook sans contribution connue', ['tx_ref' => $txRef]);
+        if (!$contribution && !$transaction) {
+            Log::info('[Flutterwave] webhook sans paiement connu', ['tx_ref' => $txRef]);
             return response()->json(['success' => true]);
         }
 
         PaymentEventRecorder::recordEvent(
-            null,
-            $contribution->id,
+            $transaction?->id,
+            $contribution?->id,
             PaymentEvent::TYPE_WEBHOOK,
             'pending',
             ['event' => $decoded['event'] ?? null, 'tx_ref' => $txRef],
         );
 
-        SyncEvenementContributionStatusJob::dispatch($contribution->id, $txRef, 0);
+        // Contribution ou don : suivi propre aux contributions ; signature :
+        // suivi des paiements de signature. Dans les deux cas, c'est la
+        // vérification auprès de l'API qui fait foi.
+        if ($contribution) {
+            SyncEvenementContributionStatusJob::dispatch($contribution->id, $txRef, 0);
+        } else {
+            SyncPaymentStatusJob::dispatch($transaction->id, $txRef, 0);
+        }
 
         return response()->json(['success' => true]);
     }
