@@ -217,7 +217,7 @@ class GroupesTest extends TestCase
 
     // ─── Communiqués ─────────────────────────────────────────────────────────
 
-    public function test_only_the_president_publishes_and_members_are_notified(): void
+    public function test_president_and_treasurer_publish_and_simple_members_cannot(): void
     {
         Sanctum::actingAs($this->president);
 
@@ -228,11 +228,15 @@ class GroupesTest extends TestCase
         Queue::assertPushed(SendGroupePushJob::class, fn ($j) => $j->groupeId === $this->groupe->id
             && $j->excludeUserId === $this->president->id);
 
-        foreach ([$this->tresorier, $this->membre] as $autre) {
-            Sanctum::actingAs($autre);
-            $this->postJson($this->base() . '/communiques', ['titre' => 'x', 'message' => 'y'])->assertStatus(403);
-        }
-        $this->assertSame(1, GroupeCommunique::count());
+        // Le trésorier communique aussi.
+        Sanctum::actingAs($this->tresorier);
+        $this->postJson($this->base() . '/communiques', ['titre' => 'Rappel', 'message' => 'Merci de contribuer.'])
+            ->assertStatus(201)->assertJsonPath('data.titre', 'Rappel');
+
+        // Un simple membre ne publie pas.
+        Sanctum::actingAs($this->membre);
+        $this->postJson($this->base() . '/communiques', ['titre' => 'x', 'message' => 'y'])->assertStatus(403);
+        $this->assertSame(2, GroupeCommunique::count());
     }
 
     public function test_members_read_communiques_with_progress(): void
@@ -264,6 +268,19 @@ class GroupesTest extends TestCase
         $this->assertDatabaseHas('groupe_communiques', ['id' => $c->id]); // jamais supprimé en base
         $this->assertDatabaseHas('contributions', ['id' => $contribution->id]);
         $this->getJson($this->base() . '/communiques')->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    public function test_treasurer_edits_and_archives_communiques_too_but_members_cannot(): void
+    {
+        $c = $this->communique();
+        Sanctum::actingAs($this->membre);
+        $this->putJson($this->base() . "/communiques/{$c->uuid}", ['titre' => 'Piraté'])->assertStatus(403);
+        $this->deleteJson($this->base() . "/communiques/{$c->uuid}")->assertStatus(403);
+
+        Sanctum::actingAs($this->tresorier);
+        $this->putJson($this->base() . "/communiques/{$c->uuid}", ['titre' => 'Corrigé par le trésorier'])->assertOk();
+        $this->deleteJson($this->base() . "/communiques/{$c->uuid}")->assertOk();
+        $this->assertNotNull($c->fresh()->archivedAt);
     }
 
     public function test_everyone_sees_who_contributed_to_a_communique(): void

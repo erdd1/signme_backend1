@@ -42,9 +42,9 @@ use Illuminate\Http\Request;
  * GET    /mes-groupes
  * GET    /mes-groupes/{uuid}
  * GET    /mes-groupes/{uuid}/communiques
- * POST   /mes-groupes/{uuid}/communiques                         [président]
- * PUT    /mes-groupes/{uuid}/communiques/{cuuid}                 [président]
- * DELETE /mes-groupes/{uuid}/communiques/{cuuid}                 [président] (archive)
+ * POST   /mes-groupes/{uuid}/communiques                         [président/trésorier]
+ * PUT    /mes-groupes/{uuid}/communiques/{cuuid}                 [président/trésorier]
+ * DELETE /mes-groupes/{uuid}/communiques/{cuuid}                 [président/trésorier] (archive)
  * GET    /mes-groupes/{uuid}/communiques/{cuuid}/contributions
  * POST   /mes-groupes/{uuid}/contributions                       (communiqueUuid absent = don libre)
  * GET    /mes-groupes/{uuid}/mouvements
@@ -108,7 +108,7 @@ class MesGroupesController extends Controller
 
     public function storeCommunique(StoreCommuniqueRequest $request, string $uuid): JsonResponse
     {
-        [$groupe] = $this->access->chargerPresident($request->user(), $uuid);
+        [$groupe] = $this->access->chargerResponsable($request->user(), $uuid);
         $communique = $this->communiques->creer($request->user(), $groupe, $request->validated())->load('auteur:id,nom');
 
         return $this->createdResponse((new CommuniqueResource($communique))->toArray($request), 'Communiqué publié avec succès.');
@@ -116,7 +116,7 @@ class MesGroupesController extends Controller
 
     public function updateCommunique(UpdateCommuniqueRequest $request, string $uuid, string $communiqueUuid): JsonResponse
     {
-        [$groupe] = $this->access->chargerPresident($request->user(), $uuid);
+        [$groupe] = $this->access->chargerResponsable($request->user(), $uuid);
         $communique = $this->communiques->modifier($groupe, $communiqueUuid, $request->validated());
         $stats = $this->communiques->statsParCommunique($groupe)[$communique->id] ?? null;
 
@@ -125,7 +125,7 @@ class MesGroupesController extends Controller
 
     public function archiverCommunique(Request $request, string $uuid, string $communiqueUuid): JsonResponse
     {
-        [$groupe] = $this->access->chargerPresident($request->user(), $uuid);
+        [$groupe] = $this->access->chargerResponsable($request->user(), $uuid);
         $this->communiques->archiver($groupe, $communiqueUuid);
 
         return $this->successResponse(null, 'Communiqué retiré avec succès.');

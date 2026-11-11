@@ -49,17 +49,6 @@ class GroupeAccessService
         return [$groupe, $this->membership->exigerMembre($user, $groupe)];
     }
 
-    /** @return array{0: Groupe, 1: array{estPresident: bool, estTresorier: bool}} */
-    public function chargerPresident(User $user, string $groupeUuid): array
-    {
-        [$groupe, $poste] = $this->charger($user, $groupeUuid);
-        if (!$poste['estPresident']) {
-            throw ApiException::forbidden('Seul le président du groupe peut effectuer cette action.');
-        }
-
-        return [$groupe, $poste];
-    }
-
     /** Président ou trésorier (gestion de la caisse). @return array{0: Groupe, 1: array{estPresident: bool, estTresorier: bool}} */
     public function chargerResponsable(User $user, string $groupeUuid): array
     {
