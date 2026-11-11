@@ -58,6 +58,48 @@ class TransactionService
         );
     }
 
+    // ─── Badge « nouvelle transaction » (onglet Services) ────────────────────
+
+    /**
+     * Transactions EFFECTUÉES (confirmées) depuis la dernière consultation de
+     * « Mes transactions » — quelle que soit leur origine : contribution, don,
+     * paiement de signature, ou signature en espèces enregistrée par un ancien.
+     * Une transaction compte à sa CONFIRMATION (un paiement lancé puis validé
+     * plus tard compte au moment où il aboutit). Abandons et échecs jamais.
+     */
+    public function nonLues(User $user): int
+    {
+        // Jamais consulté : depuis la création du compte.
+        $depuis = $user->last_read_transactions_at ?? $user->created_at;
+
+        $contributions = Contribution::where('userId', $user->id)
+            ->where('statut', Contribution::STATUT_COMPLETED)
+            ->whereRaw('COALESCE(confirmed_at, created_at) > ?', [$depuis])
+            ->count();
+
+        $paiementsSignature = PaymentTransaction::where('userId', $user->id)
+            ->where('status', 'completed')
+            ->whereRaw('COALESCE(confirmed_at, created_at) > ?', [$depuis])
+            ->count();
+
+        // Espèces : une transaction par passage chez l'ancien (comme dans la liste).
+        $especes = Signature::where('userId', $user->id)
+            ->where('paymentMethod', Signature::PAYMENT_ESPECES)
+            ->where('status', Signature::STATUS_COMPLETED)
+            ->where('created_at', '>', $depuis)
+            ->get()
+            ->groupBy(fn (Signature $s) => $s->ancienId . '|' . $s->created_at?->format('Y-m-d H:i'))
+            ->count();
+
+        return $contributions + $paiementsSignature + $especes;
+    }
+
+    /** L'utilisateur a consulté « Mes transactions » : le badge repart de zéro. */
+    public function marquerLues(User $user): void
+    {
+        $user->forceFill(['last_read_transactions_at' => now()])->save();
+    }
+
     // ─── Sources ─────────────────────────────────────────────────────────────
 
     /** @return Collection<int, array<string, mixed>> */

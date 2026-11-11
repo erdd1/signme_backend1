@@ -38,6 +38,7 @@ use Laravel\Sanctum\HasApiTokens;
  * @property \Carbon\Carbon|null $last_read_historique_at              Dernière visite onglet Historique
  * @property \Carbon\Carbon|null $last_read_historique_signatures_at   Dernière visite onglet Historique Signatures
  * @property \Carbon\Carbon|null $last_read_evenements_at              Dernière visite du fil d'actualité (badge Événements)
+ * @property \Carbon\Carbon|null $last_read_transactions_at           Dernière consultation de « Mes transactions » (badge Services)
  */
     class User extends Authenticatable
     {
@@ -140,6 +141,7 @@ use Laravel\Sanctum\HasApiTokens;
             'last_read_historique_at'              => 'datetime',
             'last_read_historique_signatures_at'   => 'datetime',
             'last_read_evenements_at'              => 'datetime',
+            'last_read_transactions_at'            => 'datetime',
         ];
     }
 

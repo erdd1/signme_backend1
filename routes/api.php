@@ -441,6 +441,8 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // financières de l'utilisateur, tous rôles)
     // =========================================================================
     Route::get('/transactions', [TransactionController::class, 'index']);
+    Route::get('/transactions/non-lues', [TransactionController::class, 'nonLues']);
+    Route::post('/transactions/lues', [TransactionController::class, 'marquerLues']);
 
     // =========================================================================
     // CLIENT MES CONTRIBUTIONS (Module "Mes dépenses" - tous rôles)

@@ -16,12 +16,27 @@ use Illuminate\Validation\Rule;
  *   → toutes les transactions financières de l'utilisateur connecté
  *     (contributions, dons, signatures — Mobile Money, carte, espèces),
  *     de la plus récente à la plus ancienne.
+ *
+ * GET  /api/v1/transactions/non-lues → nombre de nouvelles transactions (badge Services)
+ * POST /api/v1/transactions/lues     → marque « Mes transactions » comme consultées
  */
 class TransactionController extends Controller
 {
     use ApiResponseTrait;
 
     public function __construct(private readonly TransactionService $service) {}
+
+    public function nonLues(Request $request): JsonResponse
+    {
+        return $this->successResponse(['count' => $this->service->nonLues($request->user())], 'Compteur récupéré avec succès.');
+    }
+
+    public function marquerLues(Request $request): JsonResponse
+    {
+        $this->service->marquerLues($request->user());
+
+        return $this->successResponse(null, 'Transactions marquées comme consultées.');
+    }
 
     public function index(Request $request): JsonResponse
     {
