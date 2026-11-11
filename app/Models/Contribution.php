@@ -65,6 +65,18 @@ class Contribution extends Model
         ];
     }
 
+    /**
+     * Paiement par carte déclaré échoué PAR EXPIRATION (aucune confirmation à
+     * temps) : le lien de paiement peut encore être payé après coup, ce
+     * paiement doit alors être rattrapé — jamais perdu.
+     */
+    public function estExpiree(): bool
+    {
+        return $this->statut === self::STATUT_FAILED
+            && $this->paymentGateway === self::GATEWAY_FLUTTERWAVE
+            && ($this->payment_metadata['expired'] ?? false) === true;
+    }
+
     public function evenement(): BelongsTo
     {
         return $this->belongsTo(Evenement::class, 'evenementId');

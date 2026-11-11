@@ -10,12 +10,14 @@ use App\Models\Evenement;
 use App\Models\Groupe;
 use App\Models\GroupeCommunique;
 use App\Models\PaymentEvent;
+use App\Modules\Evenement\Application\Jobs\SyncEvenementContributionStatusJob;
 use App\Models\User;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
 use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -204,7 +206,7 @@ class ContributionService
                     ['payment_reference' => $paymentRef, 'paymentMethod' => $paymentMethod],
                 );
 
-                $this->contributionPollingDispatcher->schedule($contribution->id, $paymentRef);
+                $this->contributionPollingDispatcher->schedule($contribution->id, $paymentRef, $isCard);
 
                 Log::info('Contribution événement — paiement NotchPay lancé', [
                     'contribution_id'   => $contribution->id,
@@ -261,7 +263,41 @@ class ContributionService
             throw ApiException::notFound('Contribution');
         }
 
-        return $contribution;
+        return $this->rafraichirSiCarteEnAttente($contribution);
+    }
+
+    /**
+     * Paiement par carte en attente : vérification « à la demande » auprès du
+     * fournisseur à chaque consultation de l'app (au plus une toutes les
+     * `card_live_check_seconds`), sans attendre le webhook ni le prochain
+     * passage de la file — la confirmation arrive dès que la banque a validé.
+     * Ne fait jamais échouer la consultation : en cas d'erreur, le statut
+     * en base est simplement renvoyé.
+     */
+    private function rafraichirSiCarteEnAttente(Contribution $contribution): Contribution
+    {
+        if ($contribution->statut !== Contribution::STATUT_PENDING
+            || $contribution->paymentGateway !== Contribution::GATEWAY_FLUTTERWAVE
+            || !$contribution->payment_reference) {
+            return $contribution;
+        }
+
+        $ttl = (int) config('payment.polling.card_live_check_seconds', 8);
+        if (!Cache::add("card-live-check:contribution:{$contribution->id}", 1, $ttl)) {
+            return $contribution;
+        }
+
+        try {
+            (new SyncEvenementContributionStatusJob($contribution->id, $contribution->payment_reference, 0))
+                ->handle($this->gateways, $this);
+            return $contribution->fresh();
+        } catch (\Throwable $e) {
+            Log::warning('Vérification carte à la demande impossible', [
+                'contribution_id' => $contribution->id,
+                'error'           => $e->getMessage(),
+            ]);
+            return $contribution;
+        }
     }
 
     /**
@@ -290,12 +326,21 @@ class ContributionService
             }
 
             // Idempotence : déjà traitée (webhook + polling peuvent arriver en double).
-            if (in_array($contribution->statut, [Contribution::STATUT_COMPLETED, Contribution::STATUT_FAILED], true)) {
+            // Seule exception : un paiement par carte expiré faute de
+            // confirmation, finalement payé sur le lien encore ouvert — il est
+            // rattrapé ci-dessous (jamais d'argent encaissé sans contribution).
+            $rattrapage = $contribution->estExpiree();
+            if (!$rattrapage
+                && in_array($contribution->statut, [Contribution::STATUT_COMPLETED, Contribution::STATUT_FAILED], true)) {
                 Log::info('Contribution déjà traitée (idempotence)', ['contribution_id' => $contribution->id]);
                 return;
             }
 
             $internalStatus = $this->gateways->forContribution($contribution)->mapStatus($rawStatus);
+
+            if ($rattrapage && ($internalStatus !== Contribution::STATUT_COMPLETED || !$this->cardPaymentMatches($contribution, $payload))) {
+                return; // toujours pas payé (ou montant inattendu) : reste expirée
+            }
 
             // Carte : le montant et la devise réellement encaissés doivent
             // correspondre à ce qui avait été demandé, sinon le paiement est
@@ -311,6 +356,14 @@ class ContributionService
                     'attendu'         => $contribution->montantTotal,
                     'recu'            => $payload['amount'] ?? null,
                     'devise_recue'    => $payload['currency'] ?? null,
+                ]);
+            }
+
+            if ($rattrapage) {
+                $payload['late_confirmation'] = true;
+                Log::warning('Contribution carte expirée puis payée — rattrapée et créditée', [
+                    'contribution_id' => $contribution->id,
+                    'montantTotal'    => $contribution->montantTotal,
                 ]);
             }
 

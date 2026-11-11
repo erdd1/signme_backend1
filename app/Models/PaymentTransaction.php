@@ -54,6 +54,14 @@ class PaymentTransaction extends Model
         ];
     }
 
+    /** Voir {@see Contribution::estExpiree()}. */
+    public function estExpiree(): bool
+    {
+        return $this->status === 'failed'
+            && $this->paymentGateway === self::GATEWAY_FLUTTERWAVE
+            && ($this->payment_metadata['expired'] ?? false) === true;
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'userId');
