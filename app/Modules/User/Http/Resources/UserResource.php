@@ -55,6 +55,7 @@ class UserResource extends JsonResource
             // et/ou 'tresorier' (sans rapport avec le rôle `role`).
             'groupes' => $this->whenLoaded('groupes', fn () => $this->groupes->map(fn ($g) => [
                 'id'     => $g->id,
+                'uuid'   => $g->uuid,
                 'nom'    => $g->nom,
                 'postes' => array_values(array_filter([
                     $g->pivot->estPresident ? \App\Models\Groupe::POSTE_PRESIDENT : null,
