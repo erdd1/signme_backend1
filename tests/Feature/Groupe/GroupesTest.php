@@ -600,6 +600,90 @@ class GroupesTest extends TestCase
         $this->getJson('/api/v1/retraits')->assertOk()->assertJsonCount(0, 'data');
     }
 
+    // ─── Badges de notification ──────────────────────────────────────────────
+
+    private function lu(User $u): void
+    {
+        \DB::table('groupe_user')->where('groupeId', $this->groupe->id)->where('userId', $u->id)
+            ->update(['lastReadAt' => now()->subMinute()]);
+    }
+
+    private function nonLus(User $u): int
+    {
+        Sanctum::actingAs($u);
+
+        return $this->getJson('/api/v1/mes-groupes')->assertOk()->json('data.0.nonLus');
+    }
+
+    public function test_badges_count_new_communiques_and_transactions_of_others_since_the_last_visit(): void
+    {
+        $this->lu($this->membre);
+        $this->assertSame(0, $this->nonLus($this->membre));
+
+        $c = $this->communique();                                      // +1 communiqué (publié par le président)
+        $this->contributionComplete($this->tresorier, 2000, $c);       // +1 contribution en ligne
+        $this->groupe->entreesCash()->create(['auteurId' => $this->president->id, 'montant' => 500, 'dateEntree' => today()]); // +1 cash
+        Retrait::create([
+            'churchId' => null, 'groupeId' => $this->groupe->id, 'userId' => $this->tresorier->id,
+            'retrait_beneficiaire_id' => $this->beneficiaire($this->tresorier)->id, 'montant_demande' => 1000, 'frais' => 0,
+            'montant_net' => 1000, 'statut' => 'completed', 'reference' => 'R-' . Str::random(6),
+        ]);                                                            // +1 retrait
+
+        $this->assertSame(4, $this->nonLus($this->membre));
+    }
+
+    public function test_my_own_actions_and_failed_or_cancelled_items_never_count(): void
+    {
+        $this->lu($this->president);
+
+        $c = $this->communique();                                      // publié par le président lui-même
+        $this->contributionComplete($this->president, 2000, $c);       // sa propre contribution
+        $annulee = $this->groupe->entreesCash()->create(['auteurId' => $this->tresorier->id, 'montant' => 500, 'dateEntree' => today()]);
+        $annulee->update(['annuleAt' => now()]);                       // cash annulé
+        $this->communique(['archivedAt' => now(), 'titre' => 'Archivé']); // communiqué archivé
+        Retrait::create([
+            'churchId' => null, 'groupeId' => $this->groupe->id, 'userId' => $this->tresorier->id,
+            'retrait_beneficiaire_id' => $this->beneficiaire($this->tresorier)->id, 'montant_demande' => 1000, 'frais' => 0,
+            'montant_net' => 1000, 'statut' => 'failed', 'reference' => 'R-' . Str::random(6),
+        ]);                                                            // retrait échoué
+
+        $this->assertSame(0, $this->nonLus($this->president));
+    }
+
+    public function test_opening_the_group_clears_its_badge_only_for_that_member(): void
+    {
+        $this->lu($this->membre);
+        $this->lu($this->tresorier);
+        $this->communique();
+
+        $this->assertSame(1, $this->nonLus($this->membre));
+
+        Sanctum::actingAs($this->membre);
+        $this->postJson($this->base() . '/lu')->assertOk();
+
+        $this->assertSame(0, $this->nonLus($this->membre));
+        $this->assertSame(1, $this->nonLus($this->tresorier)); // les autres gardent le leur
+    }
+
+    public function test_a_non_member_cannot_mark_a_group_as_read(): void
+    {
+        Sanctum::actingAs($this->chretien());
+
+        $this->postJson($this->base() . '/lu')->assertStatus(404);
+    }
+
+    public function test_new_members_only_see_what_happened_since_they_joined(): void
+    {
+        $this->communique()->forceFill(['created_at' => now()->subMinutes(5)])->save(); // avant son arrivée
+        $nouveau = $this->chretien();
+        $this->groupe->membres()->attach($nouveau->id);
+        \DB::table('groupe_user')->where('userId', $nouveau->id)->update(['created_at' => now()->subMinute()]);
+        $this->assertSame(0, $this->nonLus($nouveau));
+
+        $this->communique(['titre' => 'Après son arrivée']);
+        $this->assertSame(1, $this->nonLus($nouveau));
+    }
+
     // ─── Groupe archivé au lieu de supprimé ──────────────────────────────────
 
     public function test_group_with_money_is_archived_not_deleted_and_history_is_kept(): void

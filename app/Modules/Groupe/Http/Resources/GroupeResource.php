@@ -12,7 +12,12 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class GroupeResource extends JsonResource
 {
     /** @param array<string, mixed>|null $caisse */
-    public function __construct($resource, private readonly ?array $caisse = null, private readonly ?array $responsables = null)
+    public function __construct(
+        $resource,
+        private readonly ?array $caisse = null,
+        private readonly ?array $responsables = null,
+        private readonly ?int $nonLus = null,
+    )
     {
         parent::__construct($resource);
     }
@@ -34,6 +39,10 @@ class GroupeResource extends JsonResource
             'estTresorier' => $estTresorier,
             'nbMembres'    => $this->membres_count ?? null,
         ];
+
+        if ($this->nonLus !== null) {
+            $data['nonLus'] = $this->nonLus;
+        }
 
         if ($this->caisse !== null) {
             $data['caisse'] = $this->caisse;

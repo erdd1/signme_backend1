@@ -12,6 +12,7 @@ use App\Modules\Auth\Application\Services\RateLimitService;
 use App\Modules\Evenement\Application\Services\ContributionService;
 use App\Modules\Evenement\Http\Resources\ContributionResource;
 use App\Modules\Groupe\Application\Services\GroupeAccessService;
+use App\Modules\Groupe\Application\Services\GroupeBadgeService;
 use App\Modules\Groupe\Application\Services\GroupeCaisseService;
 use App\Modules\Groupe\Application\Services\GroupeCashService;
 use App\Modules\Groupe\Application\Services\GroupeCommuniqueService;
@@ -41,6 +42,7 @@ use Illuminate\Http\Request;
  *
  * GET    /mes-groupes
  * GET    /mes-groupes/{uuid}
+ * POST   /mes-groupes/{uuid}/lu
  * GET    /mes-groupes/{uuid}/communiques
  * POST   /mes-groupes/{uuid}/communiques                         [président/trésorier]
  * PUT    /mes-groupes/{uuid}/communiques/{cuuid}                 [président/trésorier]
@@ -63,6 +65,7 @@ class MesGroupesController extends Controller
     public function __construct(
         private readonly GroupeAccessService $access,
         private readonly GroupeCaisseService $caisse,
+        private readonly GroupeBadgeService $badges,
         private readonly GroupeCommuniqueService $communiques,
         private readonly GroupeCashService $cash,
         private readonly GroupeMouvementsService $mouvements,
@@ -73,8 +76,11 @@ class MesGroupesController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $groupes = $this->access->listPourMembre($request->user())
-            ->map(fn (Groupe $g) => (new GroupeResource($g))->toArray($request))
+        $liste = $this->access->listPourMembre($request->user());
+        $nonLus = $this->badges->compter($request->user(), $liste);
+
+        $groupes = $liste
+            ->map(fn (Groupe $g) => (new GroupeResource($g, nonLus: $nonLus[$g->id] ?? 0))->toArray($request))
             ->values();
 
         return $this->successResponse($groupes, 'Groupes récupérés avec succès.');
@@ -90,6 +96,15 @@ class MesGroupesController extends Controller
             (new GroupeResource($groupe, $this->caisse->caisse($groupe), $this->responsables($groupe)))->toArray($request),
             'Groupe récupéré avec succès.'
         );
+    }
+
+    /** Le membre a consulté le groupe : ses badges repartent de zéro. */
+    public function marquerLu(Request $request, string $uuid): JsonResponse
+    {
+        [$groupe] = $this->access->charger($request->user(), $uuid);
+        $this->badges->marquerLu($request->user(), $groupe);
+
+        return $this->successResponse(null, 'Groupe marqué comme lu.');
     }
 
     // ─── Communiqués ─────────────────────────────────────────────────────────

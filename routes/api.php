@@ -414,6 +414,7 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     Route::prefix('mes-groupes')->group(function () {
         Route::get('/',       [MesGroupesController::class, 'index']);
         Route::get('/{uuid}', [MesGroupesController::class, 'show']);
+        Route::post('/{uuid}/lu', [MesGroupesController::class, 'marquerLu']);
 
         Route::get('/{uuid}/communiques',                             [MesGroupesController::class, 'communiques']);
         Route::post('/{uuid}/communiques',                            [MesGroupesController::class, 'storeCommunique']);

@@ -168,7 +168,8 @@ use Laravel\Sanctum\HasApiTokens;
     public function groupes(): BelongsToMany
     {
         return $this->belongsToMany(Groupe::class, 'groupe_user', 'userId', 'groupeId')
-            ->withPivot(['estPresident', 'estTresorier']);
+            ->withPivot(['estPresident', 'estTresorier', 'lastReadAt'])
+            ->withTimestamps();
     }
 
     public function signatures(): HasMany

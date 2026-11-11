@@ -53,7 +53,8 @@ class Groupe extends Model
     public function membres(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'groupe_user', 'groupeId', 'userId')
-            ->withPivot(['estPresident', 'estTresorier']);
+            ->withPivot(['estPresident', 'estTresorier', 'lastReadAt'])
+            ->withTimestamps();
     }
 
     public function communiques(): HasMany
