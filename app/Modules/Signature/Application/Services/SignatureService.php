@@ -13,8 +13,11 @@ use App\Core\Exceptions\ApiException;
 use App\Core\Services\PaymentQueueHealthService;
 use App\Modules\AncienDesignation\Application\Services\AncienDesignationService;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
+use App\Modules\Evenement\Application\Services\CardFeeCalculatorService;
+use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use App\Modules\Payment\Application\Services\PaymentPollingDispatcher;
 use App\Modules\Payment\Application\Services\PaymentStatusCache;
+use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use App\Domain\Entities\AncienDesignationEntity;
 use Carbon\Carbon;
@@ -38,6 +41,8 @@ class SignatureService
         private readonly AncienDesignationService $ancienDesignationService,
         private readonly PaymentPollingDispatcher $paymentPollingDispatcher,
         private readonly PaymentQueueHealthService $paymentQueueHealthService,
+        private readonly FlutterwaveGateway $flutterwaveGateway,
+        private readonly PaymentGatewayRegistry $gateways,
     ) {}
 
     // =========================================================================
@@ -45,7 +50,9 @@ class SignatureService
     // =========================================================================
 
     /**
-     * Initie une signature à distance avec paiement NotchPay Mobile Money.
+     * Initie une signature à distance : paiement Mobile Money (NotchPay, PUSH
+     * sur le téléphone) ou par carte bancaire (Flutterwave, page de paiement
+     * hébergée dont l'adresse est renvoyée dans `checkout_url`).
      *
      * Étapes :
      * 1. Valider les mois (non futurs, non déjà signés, pas de doublons)
@@ -74,9 +81,16 @@ class SignatureService
 
         $months        = $data['months'];      // ['2026-01', '2026-02', ...]
         $amount        = (int) $data['amount'];
-        $paymentMethod = $data['paymentMethod']; // mobile_money
-        $paymentOperator = $data['paymentOperator'] ?? null; // ORANGE MONEY | MTN MOBILE MONEY
-        $phoneNumber   = $data['phoneNumber'] ?? null;
+        $paymentMethod = $data['paymentMethod']; // mobile_money | card
+        $isCard        = $paymentMethod === PaymentTransaction::METHOD_CARD;
+
+        if ($isCard && !config('payment.card.enabled')) {
+            throw ApiException::serviceUnavailable('Le paiement par carte n\'est pas disponible pour le moment.');
+        }
+
+        // Carte : ni opérateur ni numéro de téléphone (saisie sur la page hébergée).
+        $paymentOperator = $isCard ? null : ($data['paymentOperator'] ?? null); // ORANGE MONEY | MTN MOBILE MONEY
+        $phoneNumber   = $isCard ? null : ($data['phoneNumber'] ?? null);
 
         Log::info("Initiation de signature à distance", [
             'userId'          => $paroissien->id,
@@ -106,13 +120,26 @@ class SignatureService
         }
         $feeData = FeeCalculator::calculateTotal($amount, count($months));
 
+        // Frais totaux et total à débiter. Carte : frais retenus par le
+        // fournisseur sur le TOTAL, à la charge du fidèle (l'église reçoit
+        // exactement les offrandes) ; Mobile Money : grille par mois.
+        if ($isCard) {
+            $card      = CardFeeCalculatorService::majorer($amount * count($months));
+            $totalFees = $card['frais'];
+            $total     = $card['total'];
+        } else {
+            $totalFees = $feeData['fees'] * count($months);
+            $total     = $feeData['total'];
+        }
+        $feesPerMonth = $isCard ? (int) ceil($totalFees / count($months)) : $feeData['fees'];
+
         Log::info("✅ Montant validé - Frais calculés", [
             'amountPerMonth' => $amount,
-            'totalFees'      => $feeData['fees'] * count($months),
-            'totalCharged'   => $feeData['total'],
+            'totalFees'      => $totalFees,
+            'totalCharged'   => $total,
         ]);
 
-        return DB::transaction(function () use ($paroissien, $months, $amount, $feeData, $paymentMethod, $paymentOperator, $phoneNumber) {
+        return DB::transaction(function () use ($paroissien, $months, $amount, $totalFees, $total, $feesPerMonth, $paymentMethod, $paymentOperator, $phoneNumber, $isCard) {
 
             // ─── 3. Créer un PaymentTransaction d'abord ───────────────────
             $transaction = PaymentTransaction::create([
@@ -121,11 +148,12 @@ class SignatureService
                 'paymentOperator' => $paymentOperator,
                 'paymentNumber'   => $phoneNumber,
                 'paymentMethod'   => $paymentMethod,
+                'paymentGateway'  => $isCard ? PaymentTransaction::GATEWAY_FLUTTERWAVE : PaymentTransaction::GATEWAY_NOTCHPAY,
                 'amountPerMonth'  => $amount,
                 'monthsCount'     => count($months),
                 'totalAmount'     => $amount * count($months),
-                'fees'            => $feeData['fees'] * count($months),
-                'amountCharged'   => $feeData['total'],
+                'fees'            => $totalFees,
+                'amountCharged'   => $total,
                 'status'          => 'pending',
                 'signatureType'   => 'distance',
                 'months'          => json_encode($months), // Stocker les mois pour le webhook
@@ -138,8 +166,8 @@ class SignatureService
                 'months'          => $months,
                 'amountPerMonth'  => $amount,
                 'totalAmount'     => $amount * count($months),
-                'fees'            => $feeData['fees'] * count($months),
-                'paymentMethod'   => $paymentOperator,
+                'fees'            => $totalFees,
+                'paymentMethod'   => $isCard ? Signature::PAYMENT_CARTE : $paymentOperator,
                 'phoneNumber'     => $phoneNumber,
                 'signatureType'   => 'distance',
                 'status'          => 'pending',
@@ -157,7 +185,7 @@ class SignatureService
                 null,
                 PaymentEvent::TYPE_CREATED,
                 'pending',
-                ['months' => $months, 'amountCharged' => $feeData['total']],
+                ['months' => $months, 'amountCharged' => $total],
             );
 
             // ─── 4. NE PAS créer les signatures en 'pending' ────────────────
@@ -170,19 +198,21 @@ class SignatureService
             Log::info("Initiation du paiement NotchPay", [
                 'transaction_id' => $transaction->id,
                 'paymentMethod'  => $paymentMethod,
-                'amount'         => $feeData['total'],
+                'amount'         => $total,
                 'description'    => $description,
             ]);
 
             try {
-                $paymentRef = $this->notchPayGateway->initiateMobileMoney(
-                    $transaction->id,
-                    $phoneNumber,
-                    $paymentOperator,
-                    $feeData['total'],
-                    $description,
-                    $paroissien->email,
-                );
+                $paymentRef = $isCard
+                    ? $this->startCardCheckout($transaction, $paroissien, $total, $description)
+                    : $this->notchPayGateway->initiateMobileMoney(
+                        $transaction->id,
+                        $phoneNumber,
+                        $paymentOperator,
+                        $total,
+                        $description,
+                        $paroissien->email,
+                    );
 
                 $transaction->update(['payment_reference' => $paymentRef]);
 
@@ -238,14 +268,19 @@ class SignatureService
 
             return [
                 'payment_reference' => $paymentRef,
-                'total_amount'      => $feeData['total'],
+                'payment_method'    => $paymentMethod,
+                'total_amount'      => $total,
                 'amount_per_month'  => $amount,
-                'fees_per_month'    => $feeData['fees'],
+                'fees_per_month'    => $feesPerMonth,
+                'fees_total'        => $totalFees,
                 'months_count'      => count($months),
                 'months'            => $months,
                 'status'            => 'pending',
-                'message'           => 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
+                'message'           => $isCard
+                    ? 'Finalisez le paiement sur la page sécurisée de votre banque.'
+                    : 'Un PUSH de confirmation a été envoyé sur votre téléphone. Vous avez 60 secondes pour confirmer.',
                 'transaction_id'    => $transaction->id,
+                'checkout_url'      => $isCard ? ($transaction->fresh()->payment_metadata['checkout_url'] ?? null) : null,
             ];
         });
     }
@@ -271,7 +306,7 @@ class SignatureService
 
         $cached = PaymentStatusCache::get($transactionId);
         if ($cached !== null) {
-            return array_merge($cached, [
+            return array_merge($cached, $this->checkoutPayload($transaction, $cached['status'] ?? ''), [
                 'transaction_id' => $transactionId,
                 'is_terminal'    => in_array($cached['status'] ?? '', ['completed', 'failed'], true),
                 'poll_interval_ms' => ($cached['status'] ?? '') === 'pending' ? 3000 : 0,
@@ -281,11 +316,58 @@ class SignatureService
         PaymentStatusCache::putFromTransaction($transaction);
         $payload = PaymentStatusCache::get($transactionId) ?? PaymentStatusCache::payloadFromModel($transaction);
 
-        return array_merge($payload, [
+        return array_merge($payload, $this->checkoutPayload($transaction, $transaction->status), [
             'transaction_id' => $transactionId,
             'is_terminal'    => in_array($transaction->status, ['completed', 'failed'], true),
             'poll_interval_ms' => $transaction->status === 'pending' ? 3000 : 0,
         ]);
+    }
+
+    /**
+     * Paiement par carte en cours : adresse de la page de paiement, pour que
+     * l'application puisse la rouvrir. Absente dès que le paiement est terminé.
+     *
+     * @return array<string, mixed>
+     */
+    private function checkoutPayload(PaymentTransaction $transaction, string $status): array
+    {
+        if ($transaction->paymentMethod !== PaymentTransaction::METHOD_CARD || $status !== 'pending') {
+            return [];
+        }
+
+        return ['checkout_url' => $transaction->payment_metadata['checkout_url'] ?? null];
+    }
+
+    /**
+     * Crée la page de paiement carte et mémorise son adresse ; la référence
+     * est le `tx_ref` Flutterwave.
+     */
+    private function startCardCheckout(PaymentTransaction $transaction, User $paroissien, int $total, string $description): string
+    {
+        $txRef = 'SIGNME-SIG-' . \Illuminate\Support\Str::uuid();
+
+        $checkoutUrl = $this->flutterwaveGateway->createCheckout(
+            $txRef,
+            $total,
+            route('payment.callback'),
+            $paroissien->email,
+            $paroissien->nom,
+            $description,
+        );
+
+        $transaction->update(['payment_metadata' => ['checkout_url' => $checkoutUrl]]);
+
+        return $txRef;
+    }
+
+    /** @param array<string, mixed> $payload données vérifiées auprès de Flutterwave */
+    private function cardPaymentMatches(PaymentTransaction $transaction, array $payload): bool
+    {
+        $amount = $payload['amount'] ?? null;
+
+        return is_numeric($amount)
+            && (int) round((float) $amount) === (int) $transaction->amountCharged
+            && strtoupper((string) ($payload['currency'] ?? '')) === strtoupper((string) config('payment.card.currency'));
     }
 
     // =========================================================================
@@ -504,15 +586,16 @@ class SignatureService
             return;
         }
 
-        $internalStatus = $this->notchPayGateway->mapStatus($rawStatus);
-
-        Log::info('NotchPay notification reçue', [
-            'reference'       => $paymentRef,
-            'raw_status'      => $rawStatus,
-            'internal_status' => $internalStatus,
+        Log::info('Notification de paiement reçue', [
+            'reference'  => $paymentRef,
+            'raw_status' => $rawStatus,
         ]);
 
-        DB::transaction(function () use ($paymentRef, $internalStatus, $payload) {
+        // Statut interne : traduit par le fournisseur de la transaction
+        // (NotchPay ou Flutterwave), connu une fois la transaction verrouillée.
+        $internalStatus = 'pending';
+
+        DB::transaction(function () use ($paymentRef, $rawStatus, $payload, &$internalStatus) {
 
             // ─── Récupérer la PaymentTransaction (verrouillée pour la durée
             // de la transaction) ─────────────────────────────────────────────
@@ -530,6 +613,25 @@ class SignatureService
                     'payload'   => $payload,
                 ]);
                 return;
+            }
+
+            $internalStatus = $this->gateways->forTransaction($transaction)->mapStatus($rawStatus);
+
+            // Carte : le montant et la devise réellement encaissés doivent
+            // correspondre à ce qui avait été demandé, sinon le paiement est
+            // refusé (jamais de signature créée sur un montant inattendu).
+            if ($internalStatus === 'completed'
+                && $transaction->paymentGateway === PaymentTransaction::GATEWAY_FLUTTERWAVE
+                && !$this->cardPaymentMatches($transaction, $payload)) {
+                $internalStatus = 'failed';
+                $payload['message'] = 'Montant ou devise différents de ceux demandés';
+
+                Log::critical('Signature par carte — montant/devise inattendus, paiement refusé', [
+                    'transaction_id' => $transaction->id,
+                    'attendu'        => $transaction->amountCharged,
+                    'recu'           => $payload['amount'] ?? null,
+                    'devise_recue'   => $payload['currency'] ?? null,
+                ]);
             }
 
             Log::info("PaymentTransaction trouvée", [
@@ -582,7 +684,7 @@ class SignatureService
                                     'year'           => (int)$year,
                                     'amount'         => $transaction->amountPerMonth,
                                     'fees'           => $transaction->fees > 0 ? (int)($transaction->fees / $transaction->monthsCount) : 0,
-                                    'paymentMethod'  => $transaction->paymentOperator,
+                                    'paymentMethod'  => $transaction->paymentOperator ?? Signature::PAYMENT_CARTE,
                                     'phoneNumber'    => $transaction->paymentNumber,
                                     'signatureType'  => 'distance',
                                     'status'         => 'completed',
@@ -603,7 +705,7 @@ class SignatureService
                                         'payment_reference'   => $paymentRef,
                                         'amount'             => $transaction->amountPerMonth,
                                         'fees'               => $transaction->fees > 0 ? (int)($transaction->fees / $transaction->monthsCount) : 0,
-                                        'paymentMethod'      => $transaction->paymentOperator,
+                                        'paymentMethod'      => $transaction->paymentOperator ?? Signature::PAYMENT_CARTE,
                                         'phoneNumber'        => $transaction->paymentNumber,
                                     ]);
 
@@ -631,7 +733,7 @@ class SignatureService
                             'amountPerMonth'  => $transaction->amountPerMonth,
                             'totalAmount'     => $transaction->totalAmount,
                             'fees'            => $transaction->fees,
-                            'paymentMethod'   => $transaction->paymentOperator,
+                            'paymentMethod'   => $transaction->paymentOperator ?? Signature::PAYMENT_CARTE,
                             'phoneNumber'     => $transaction->paymentNumber,
                             'signatureType'   => 'distance',
                             'status'          => 'completed',
@@ -654,7 +756,7 @@ class SignatureService
                             'amountPerMonth'  => $transaction->amountPerMonth,
                             'totalAmount'     => $transaction->totalAmount,
                             'fees'            => $transaction->fees,
-                            'paymentMethod'   => $transaction->paymentOperator,
+                            'paymentMethod'   => $transaction->paymentOperator ?? Signature::PAYMENT_CARTE,
                             'phoneNumber'     => $transaction->paymentNumber,
                             'signatureType'   => 'distance',
                             'status'          => 'failed',
@@ -683,7 +785,7 @@ class SignatureService
                         'amountPerMonth'  => $transaction->amountPerMonth,
                         'totalAmount'     => $transaction->totalAmount,
                         'fees'            => $transaction->fees,
-                        'paymentMethod'   => $transaction->paymentOperator,
+                        'paymentMethod'   => $transaction->paymentOperator ?? Signature::PAYMENT_CARTE,
                         'phoneNumber'     => $transaction->paymentNumber,
                         'signatureType'   => 'distance',
                         'status'          => 'failed',
@@ -720,7 +822,7 @@ class SignatureService
             PaymentStatusCache::putFromTransaction($transaction->fresh());
         }
 
-        Log::info('✅ Notification NotchPay traitée', [
+        Log::info('✅ Notification de paiement traitée', [
             'reference' => $paymentRef,
             'status' => $internalStatus,
         ]);

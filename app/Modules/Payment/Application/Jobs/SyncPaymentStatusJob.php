@@ -6,7 +6,7 @@ use App\Models\PaymentEvent;
 use App\Models\PaymentTransaction;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
 use App\Modules\Payment\Application\Services\PaymentStatusCache;
-use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
+use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use App\Modules\Signature\Application\Services\SignatureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -16,7 +16,10 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Vérifie le statut NotchPay en arrière-plan (file Redis payments).
+ * Vérifie le statut d'un paiement de signature auprès de son fournisseur
+ * (NotchPay pour le Mobile Money, Flutterwave pour la carte) en arrière-plan
+ * (file Redis payments). Sert aussi de suite au webhook Flutterwave : le
+ * webhook déclenche, cette vérification fait foi.
  */
 class SyncPaymentStatusJob implements ShouldQueue
 {
@@ -35,7 +38,7 @@ class SyncPaymentStatusJob implements ShouldQueue
     }
 
     public function handle(
-        NotchPayGateway $notchPayGateway,
+        PaymentGatewayRegistry $gateways,
         SignatureService $signatureService,
     ): void {
         $transaction = PaymentTransaction::find($this->transactionId);
@@ -52,10 +55,11 @@ class SyncPaymentStatusJob implements ShouldQueue
             return;
         }
 
-        $paymentData = $notchPayGateway->verifyPayment($this->paymentReference);
+        $gateway = $gateways->forTransaction($transaction);
+        $paymentData = $gateway->verifyPayment($this->paymentReference);
 
         if (!$paymentData) {
-            Log::info('SyncPaymentStatusJob: statut NotchPay indisponible', [
+            Log::info('SyncPaymentStatusJob: statut du paiement indisponible', [
                 'transactionId' => $this->transactionId,
                 'attempt'       => $this->attempt,
             ]);
@@ -63,7 +67,7 @@ class SyncPaymentStatusJob implements ShouldQueue
         }
 
         $rawStatus = $paymentData['status'] ?? '';
-        $internalStatus = $notchPayGateway->mapStatus($rawStatus);
+        $internalStatus = $gateway->mapStatus($rawStatus);
 
         // Trace technique : chaque ping, y compris ceux qui restent pending.
         PaymentEventRecorder::recordSyncLog($this->transactionId, null, $internalStatus, $paymentData);
@@ -97,7 +101,7 @@ class SyncPaymentStatusJob implements ShouldQueue
             return;
         }
 
-        // Toujours en attente côté NotchPay
+        // Toujours en attente côté fournisseur
         PaymentStatusCache::putFromTransaction($transaction->fresh());
     }
 

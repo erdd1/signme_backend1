@@ -15,6 +15,10 @@ class PaymentTransaction extends Model
     use HasFactory;
 
     public const METHOD_MOBILE_MONEY = 'mobile_money';
+    public const METHOD_CARD         = 'card';
+
+    public const GATEWAY_NOTCHPAY    = 'notchpay';
+    public const GATEWAY_FLUTTERWAVE = 'flutterwave';
 
     protected $table = 'payment_transactions';
 
@@ -24,6 +28,7 @@ class PaymentTransaction extends Model
         'paymentOperator',
         'paymentNumber',
         'paymentMethod',
+        'paymentGateway',
         'amountPerMonth',
         'monthsCount',
         'totalAmount',

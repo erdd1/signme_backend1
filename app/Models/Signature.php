@@ -42,6 +42,7 @@ class Signature extends Model
     public const STATUS_FAILED    = 'failed';
 
     public const PAYMENT_ESPECES     = 'ESPECES';
+    public const PAYMENT_CARTE       = 'CARTE';
     public const PAYMENT_ORANGE      = 'ORANGE MONEY';
     public const PAYMENT_MTN         = 'MTN MOBILE MONEY';
 
