@@ -38,6 +38,15 @@ return [
         'webhook_hash' => env('NOTCHPAY_WEBHOOK_HASH'),
     ],
 
+    // Paiement par carte bancaire (page de paiement hébergée Flutterwave).
+    // Les données de carte ne passent jamais par SignMe.
+    'flutterwave' => [
+        'secret_key'  => env('FLUTTERWAVE_SECRET_KEY'),
+        'secret_hash' => env('FLUTTERWAVE_SECRET_HASH'),
+        'base_url'    => env('FLUTTERWAVE_BASE_URL', 'https://api.flutterwave.com/v3'),
+        'timeout'     => (int) env('FLUTTERWAVE_TIMEOUT', 20),
+    ],
+
     // Client OAuth "Web" créé dans Google Cloud Console — c'est l'audience
     // (aud) attendue dans l'ID token transmis par l'app mobile via
     // google_sign_in (serverClientId).

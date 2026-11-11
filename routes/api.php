@@ -14,6 +14,8 @@ use App\Modules\Publication\Http\PublicationController;
 use App\Modules\AncienDesignation\Http\AncienDesignationController;
 use App\Modules\Rapport\Http\RapportController;
 use App\Modules\Payment\Http\PaymentController;
+use App\Modules\Payment\Http\FlutterwaveWebhookController;
+use App\Modules\Payment\Http\CardPaymentConfigController;
 use App\Modules\Badge\Http\BadgeController;
 use App\Modules\Evenement\Http\EvenementController;
 use App\Modules\Evenement\Http\ContributionController;
@@ -97,6 +99,11 @@ Route::prefix('v1')->group(function () {
     // =========================================================================
     Route::post('/webhooks/notchpay', [PaymentController::class, 'webhook'])
          ->name('payments.webhook');
+
+    // Webhook du paiement par carte (Flutterwave) — Public, signature contrôlée
+    // dans le contrôleur ; le paiement est revérifié auprès de l'API avant crédit.
+    Route::post('/webhooks/flutterwave', [FlutterwaveWebhookController::class, 'handle'])
+         ->name('payments.webhook.flutterwave');
 
     // =========================================================================
     // 4. GRILLE DES FRAIS — Public (utile pour affichage Flutter sans auth)
@@ -423,6 +430,9 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // =========================================================================
     // CLIENT PAYMENTS (Read + Initiate)
     // =========================================================================
+    // Paramètres du paiement par carte — avant /{paymentId} pour éviter sa capture.
+    Route::get('/payments/card-config', CardPaymentConfigController::class);
+
     Route::prefix('payments')->group(function () {
         Route::get('/',            [PaymentController::class, 'index']);
         Route::get('/{paymentId}', [PaymentController::class, 'show']);

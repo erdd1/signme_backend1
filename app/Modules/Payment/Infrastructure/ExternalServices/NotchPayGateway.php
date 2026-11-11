@@ -3,6 +3,7 @@
 namespace App\Modules\Payment\Infrastructure\ExternalServices;
 
 use App\Core\Exceptions\ApiException;
+use App\Modules\Payment\Domain\PaymentStatusGateway;
 use Exception;
 use GuzzleHttp\Exception\GuzzleException;
 use NotchPay\Beneficiary;
@@ -19,7 +20,7 @@ use Throwable;
  * Paiement Mobile Money (Orange Money, MTN Mobile Money) : initialize() +
  * charge() déclenche un PUSH USSD, comme le faisait CampayGateway.
  */
-class NotchPayGateway
+class NotchPayGateway implements PaymentStatusGateway
 {
     public function __construct()
     {

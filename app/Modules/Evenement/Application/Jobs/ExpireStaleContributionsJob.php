@@ -6,7 +6,7 @@ use App\Models\Contribution;
 use App\Models\PaymentEvent;
 use App\Modules\Evenement\Application\Services\ContributionService;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
-use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
+use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -36,7 +36,7 @@ class ExpireStaleContributionsJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public function handle(
-        NotchPayGateway $notchPayGateway,
+        PaymentGatewayRegistry $gateways,
         ContributionService $contributionService,
     ): void {
         $minutes = (int) config('payment.pending_expiry_minutes', 15);
@@ -47,9 +47,10 @@ class ExpireStaleContributionsJob implements ShouldQueue
             ->get();
 
         foreach ($staleContributions as $contribution) {
-            $paymentData = $notchPayGateway->verifyPayment($contribution->payment_reference);
+            $gateway = $gateways->forContribution($contribution);
+            $paymentData = $gateway->verifyPayment($contribution->payment_reference);
             $rawStatus = $paymentData['status'] ?? null;
-            $internalStatus = $rawStatus ? $notchPayGateway->mapStatus($rawStatus) : null;
+            $internalStatus = $rawStatus ? $gateway->mapStatus($rawStatus) : null;
 
             if (in_array($internalStatus, ['completed', 'failed'], true)) {
                 // NotchPay a une réponse définitive — traitée par le chemin
