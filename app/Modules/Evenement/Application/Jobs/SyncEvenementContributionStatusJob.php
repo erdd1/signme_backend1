@@ -51,7 +51,11 @@ class SyncEvenementContributionStatusJob implements ShouldQueue
             return;
         }
 
-        if (in_array($contribution->statut, [Contribution::STATUT_COMPLETED, Contribution::STATUT_FAILED], true)) {
+        // Terminée : rien à faire — sauf un paiement carte expiré, qui peut
+        // encore avoir été payé après coup (rattrapage, voir
+        // ContributionService::processPaymentNotification).
+        if (in_array($contribution->statut, [Contribution::STATUT_COMPLETED, Contribution::STATUT_FAILED], true)
+            && !$contribution->estExpiree()) {
             return;
         }
 
@@ -68,6 +72,11 @@ class SyncEvenementContributionStatusJob implements ShouldQueue
 
         $rawStatus = $paymentData['status'] ?? '';
         $internalStatus = $gateway->mapStatus($rawStatus);
+
+        // Paiement expiré, toujours pas payé : on ne rejoue ni trace ni événement.
+        if ($contribution->estExpiree() && $internalStatus !== Contribution::STATUT_COMPLETED) {
+            return;
+        }
 
         // Trace technique : chaque ping, y compris ceux qui restent pending.
         PaymentEventRecorder::recordSyncLog(null, $this->contributionId, $internalStatus, $paymentData);

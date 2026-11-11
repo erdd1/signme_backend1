@@ -9,9 +9,12 @@ use App\Modules\Payment\Application\Jobs\SyncPaymentStatusJob;
  */
 class PaymentPollingDispatcher
 {
-    public function schedule(int $transactionId, string $paymentReference): void
+    /** @param bool $card paiement par carte : vérifications espacées sur ~14 min */
+    public function schedule(int $transactionId, string $paymentReference, bool $card = false): void
     {
-        $delays = config('payment.polling.delays_seconds', [5, 15, 30, 60]);
+        $delays = $card
+            ? config('payment.polling.card_delays_seconds', [20, 60, 180, 420, 840])
+            : config('payment.polling.delays_seconds', [5, 15, 30, 60]);
         $queue  = config('payment.queue', 'payments');
         $conn   = config('payment.connection', 'redis');
 

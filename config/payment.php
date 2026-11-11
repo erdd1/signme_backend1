@@ -20,6 +20,19 @@ return [
     'polling' => [
         'delays_seconds' => [5, 10, 15, 25, 40, 60, 90, 120, 180],
         'max_attempts'   => 12,
+
+        // Carte : la saisie et l'éventuelle authentification de la banque
+        // durent bien plus qu'un PUSH Mobile Money — vérifications espacées
+        // jusqu'à ~14 min (juste sous l'expiration serveur de 15 min).
+        'card_delays_seconds' => [20, 40, 60, 90, 120, 180, 240, 300, 420, 540, 660, 780, 840],
+
+        // Délai minimal entre deux vérifications « à la demande » déclenchées
+        // par l'app qui suit un paiement par carte (évite de saturer le fournisseur).
+        'card_live_check_seconds' => 8,
+
+        // Paiement par carte expiré puis finalement payé (lien de paiement
+        // encore ouvert) : fenêtre pendant laquelle il est rattrapé et crédité.
+        'late_confirmation_hours' => 6,
     ],
 
     /*

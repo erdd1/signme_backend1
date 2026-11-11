@@ -89,6 +89,9 @@ class ExpireStaleContributionsJob implements ShouldQueue
                 'reference' => $contribution->payment_reference,
                 'status'    => 'failed',
                 'message'   => $syntheticMessage,
+                // Marque l'expiration : un paiement carte payé après coup sur
+                // le lien encore ouvert sera rattrapé (voir estExpiree()).
+                'expired'   => true,
             ]);
 
             $contribution->refresh();
@@ -107,6 +110,41 @@ class ExpireStaleContributionsJob implements ShouldQueue
                 'payment_reference' => $contribution->payment_reference,
                 'age_minutes'       => $contribution->created_at->diffInMinutes(now()),
             ]);
+        }
+
+        $this->rattraperPaiementsCarteTardifs($gateways, $contributionService);
+    }
+
+    /**
+     * Filet de sécurité : paiements par carte déclarés expirés récemment mais
+     * dont le lien de paiement était encore ouvert — vérifiés auprès du
+     * fournisseur, et crédités s'ils ont finalement été payés (le webhook
+     * couvre déjà le cas courant ; ceci couvre un webhook perdu).
+     */
+    private function rattraperPaiementsCarteTardifs(
+        PaymentGatewayRegistry $gateways,
+        ContributionService $contributionService,
+    ): void {
+        $heures = (int) config('payment.polling.late_confirmation_hours', 6);
+
+        $expirees = Contribution::where('statut', Contribution::STATUT_FAILED)
+            ->where('paymentGateway', Contribution::GATEWAY_FLUTTERWAVE)
+            ->whereNotNull('payment_reference')
+            ->where('updated_at', '>=', now()->subHours($heures))
+            ->get()
+            ->filter(fn (Contribution $c) => $c->estExpiree());
+
+        foreach ($expirees as $contribution) {
+            $gateway = $gateways->forContribution($contribution);
+            $paymentData = $gateway->verifyPayment($contribution->payment_reference);
+            $rawStatus = $paymentData['status'] ?? null;
+
+            if ($rawStatus && $gateway->mapStatus($rawStatus) === Contribution::STATUT_COMPLETED) {
+                $contributionService->processPaymentNotification(array_merge($paymentData, [
+                    'reference' => $contribution->payment_reference,
+                    'status'    => $rawStatus,
+                ]));
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ use App\Modules\Payment\Application\Services\PaymentEventRecorder;
 use App\Modules\Evenement\Application\Services\CardFeeCalculatorService;
 use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
 use App\Modules\Payment\Application\Services\PaymentPollingDispatcher;
+use App\Modules\Payment\Application\Jobs\SyncPaymentStatusJob;
 use App\Modules\Payment\Application\Services\PaymentStatusCache;
 use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
@@ -236,7 +237,7 @@ class SignatureService
                 ]);
 
                 PaymentStatusCache::putFromTransaction($transaction->fresh());
-                $this->paymentPollingDispatcher->schedule($transaction->id, $paymentRef);
+                $this->paymentPollingDispatcher->schedule($transaction->id, $paymentRef, $isCard);
 
             } catch (ApiException $e) {
                 // En cas d'échec d'initiation, marquer tout en 'failed'
@@ -304,8 +305,10 @@ class SignatureService
             throw ApiException::notFound('Transaction non trouvée ou non autorisée');
         }
 
+        $transaction = $this->rafraichirSiCarteEnAttente($transaction);
+
         $cached = PaymentStatusCache::get($transactionId);
-        if ($cached !== null) {
+        if ($cached !== null && $cached['status'] === $transaction->status) {
             return array_merge($cached, $this->checkoutPayload($transaction, $cached['status'] ?? ''), [
                 'transaction_id' => $transactionId,
                 'is_terminal'    => in_array($cached['status'] ?? '', ['completed', 'failed'], true),
@@ -321,6 +324,38 @@ class SignatureService
             'is_terminal'    => in_array($transaction->status, ['completed', 'failed'], true),
             'poll_interval_ms' => $transaction->status === 'pending' ? 3000 : 0,
         ]);
+    }
+
+    /**
+     * Paiement par carte en attente : vérification « à la demande » auprès du
+     * fournisseur à chaque consultation de l'app (au plus une toutes les
+     * `card_live_check_seconds`), sans attendre le webhook ni la file. Ne fait
+     * jamais échouer la consultation.
+     */
+    private function rafraichirSiCarteEnAttente(PaymentTransaction $transaction): PaymentTransaction
+    {
+        if ($transaction->status !== 'pending'
+            || $transaction->paymentGateway !== PaymentTransaction::GATEWAY_FLUTTERWAVE
+            || !$transaction->payment_reference) {
+            return $transaction;
+        }
+
+        $ttl = (int) config('payment.polling.card_live_check_seconds', 8);
+        if (!Cache::add("card-live-check:transaction:{$transaction->id}", 1, $ttl)) {
+            return $transaction;
+        }
+
+        try {
+            (new SyncPaymentStatusJob($transaction->id, $transaction->payment_reference, 0))
+                ->handle($this->gateways, $this);
+            return $transaction->fresh();
+        } catch (\Throwable $e) {
+            Log::warning('Vérification carte à la demande impossible', [
+                'transaction_id' => $transaction->id,
+                'error'          => $e->getMessage(),
+            ]);
+            return $transaction;
+        }
     }
 
     /**
@@ -617,6 +652,21 @@ class SignatureService
 
             $internalStatus = $this->gateways->forTransaction($transaction)->mapStatus($rawStatus);
 
+            // Paiement carte expiré faute de confirmation, finalement payé sur
+            // le lien encore ouvert : rattrapé (signatures créées, transaction
+            // passée à completed). Toujours pas payé : reste expiré, sans bruit.
+            $rattrapage = $transaction->estExpiree();
+            if ($rattrapage && ($internalStatus !== 'completed' || !$this->cardPaymentMatches($transaction, $payload))) {
+                return;
+            }
+            if ($rattrapage) {
+                $payload['late_confirmation'] = true;
+                Log::warning('Signature carte expirée puis payée — rattrapée', [
+                    'transaction_id' => $transaction->id,
+                    'amountCharged'  => $transaction->amountCharged,
+                ]);
+            }
+
             // Carte : le montant et la devise réellement encaissés doivent
             // correspondre à ce qui avait été demandé, sinon le paiement est
             // refusé (jamais de signature créée sur un montant inattendu).
@@ -802,7 +852,7 @@ class SignatureService
             // manuelle arrivant en concurrence). `confirmed_at` n'est donc posé
             // qu'une seule fois, à la toute première transition vers 'completed'.
             $txnUpdated = PaymentTransaction::where('payment_reference', $paymentRef)
-                                            ->where('status', 'pending')
+                                            ->whereIn('status', $rattrapage ? ['pending', 'failed'] : ['pending'])
                                             ->update([
                                                 'status'          => $internalStatus,
                                                 'payment_metadata' => json_encode($payload),

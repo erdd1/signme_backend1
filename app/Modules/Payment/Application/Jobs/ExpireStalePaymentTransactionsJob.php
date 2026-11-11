@@ -88,6 +88,9 @@ class ExpireStalePaymentTransactionsJob implements ShouldQueue
                 'reference' => $transaction->payment_reference,
                 'status'    => 'failed',
                 'message'   => $syntheticMessage,
+                // Marque l'expiration : un paiement carte payé après coup sur
+                // le lien encore ouvert sera rattrapé (voir estExpiree()).
+                'expired'   => true,
             ]);
 
             $transaction->refresh();
@@ -106,6 +109,40 @@ class ExpireStalePaymentTransactionsJob implements ShouldQueue
                 'payment_reference' => $transaction->payment_reference,
                 'age_minutes'       => $transaction->created_at->diffInMinutes(now()),
             ]);
+        }
+
+        $this->rattraperPaiementsCarteTardifs($gateways, $signatureService);
+    }
+
+    /**
+     * Filet de sécurité : paiements par carte déclarés expirés récemment mais
+     * dont le lien de paiement était encore ouvert — vérifiés auprès du
+     * fournisseur, et crédités s'ils ont finalement été payés.
+     */
+    private function rattraperPaiementsCarteTardifs(
+        PaymentGatewayRegistry $gateways,
+        SignatureService $signatureService,
+    ): void {
+        $heures = (int) config('payment.polling.late_confirmation_hours', 6);
+
+        $expirees = PaymentTransaction::where('status', 'failed')
+            ->where('paymentGateway', PaymentTransaction::GATEWAY_FLUTTERWAVE)
+            ->whereNotNull('payment_reference')
+            ->where('updated_at', '>=', now()->subHours($heures))
+            ->get()
+            ->filter(fn (PaymentTransaction $t) => $t->estExpiree());
+
+        foreach ($expirees as $transaction) {
+            $gateway = $gateways->forTransaction($transaction);
+            $paymentData = $gateway->verifyPayment($transaction->payment_reference);
+            $rawStatus = $paymentData['status'] ?? null;
+
+            if ($rawStatus && $gateway->mapStatus($rawStatus) === 'completed') {
+                $signatureService->processPaymentNotification(array_merge($paymentData, [
+                    'reference' => $transaction->payment_reference,
+                    'status'    => $rawStatus,
+                ]));
+            }
         }
     }
 }
