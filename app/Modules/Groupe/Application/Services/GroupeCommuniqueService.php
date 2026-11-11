@@ -6,6 +6,7 @@ use App\Core\Exceptions\ApiException;
 use App\Models\Contribution;
 use App\Models\Groupe;
 use App\Models\GroupeCommunique;
+use App\Models\GroupeEntreeCash;
 use App\Models\User;
 use App\Modules\Groupe\Application\Jobs\SendGroupePushJob;
 use Illuminate\Support\Facades\DB;
@@ -91,23 +92,40 @@ class GroupeCommuniqueService
     }
 
     /**
-     * Collecte d'un communiqué : montant net reçu et nombre de contributions
-     * complétées. Une seule requête pour tous les communiqués d'un groupe.
+     * Collecte d'un communiqué : montant reçu et nombre de contributions —
+     * contributions en ligne complétées ET argent cash enregistré pour ce
+     * communiqué (annulations exclues). Deux requêtes pour tous les communiqués.
      *
      * @return array<int, array{collecte: int, nombre: int}> indexé par communiqueId
      */
     public function statsParCommunique(Groupe $groupe): array
     {
-        return Contribution::where('groupeCollecteId', $groupe->id)
+        $stats = [];
+
+        $enLigne = Contribution::where('groupeCollecteId', $groupe->id)
             ->where('statut', Contribution::STATUT_COMPLETED)
             ->whereNotNull('communiqueId')
             ->groupBy('communiqueId')
             ->selectRaw('"communiqueId", SUM(montant) as collecte, COUNT(*) as nombre')
-            ->get()
-            ->mapWithKeys(fn ($r) => [(int) $r->communiqueId => [
-                'collecte' => (int) $r->collecte,
-                'nombre'   => (int) $r->nombre,
-            ]])
-            ->all();
+            ->get();
+
+        $cash = GroupeEntreeCash::where('groupeId', $groupe->id)
+            ->whereNull('annuleAt')
+            ->whereNotNull('communiqueId')
+            ->groupBy('communiqueId')
+            ->selectRaw('"communiqueId", SUM(montant) as collecte, COUNT(*) as nombre')
+            ->get();
+
+        foreach ([$enLigne, $cash] as $lignes) {
+            foreach ($lignes as $r) {
+                $id = (int) $r->communiqueId;
+                $stats[$id] = [
+                    'collecte' => ($stats[$id]['collecte'] ?? 0) + (int) $r->collecte,
+                    'nombre'   => ($stats[$id]['nombre'] ?? 0) + (int) $r->nombre,
+                ];
+            }
+        }
+
+        return $stats;
     }
 }

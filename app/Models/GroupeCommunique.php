@@ -56,6 +56,11 @@ class GroupeCommunique extends Model
         return $this->hasMany(Contribution::class, 'communiqueId');
     }
 
+    public function entreesCash(): HasMany
+    {
+        return $this->hasMany(GroupeEntreeCash::class, 'communiqueId');
+    }
+
     public function estArchive(): bool
     {
         return $this->archivedAt !== null;

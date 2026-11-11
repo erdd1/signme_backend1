@@ -69,7 +69,7 @@ class GroupeMouvementsService
     private function cash(Groupe $groupe): Collection
     {
         return GroupeEntreeCash::where('groupeId', $groupe->id)
-            ->with('auteur:id,nom')
+            ->with(['auteur:id,nom', 'membre:id,nom', 'communique:id,uuid,titre'])
             ->orderByDesc('created_at')
             ->limit(self::MAX_PAR_SOURCE)
             ->get()
@@ -78,9 +78,9 @@ class GroupeMouvementsService
                 'type'          => self::TYPE_CASH,
                 'sens'          => 'entree',
                 'montant'       => $e->montant,
-                'acteur'        => $e->donateur ?: $e->auteur?->nom,
-                'libelle'       => 'Reçu hors application',
-                'communiqueUuid' => null,
+                'acteur'        => $e->membre?->nom ?: $e->donateur ?: $e->auteur?->nom,
+                'libelle'       => $e->communique?->titre ?? 'Reçu hors application',
+                'communiqueUuid' => $e->communique?->uuid,
                 'note'          => $e->annuleAt ? "Annulé : {$e->motifAnnulation}" : $e->note,
                 'annule'        => $e->estAnnulee(),
                 'enregistrePar' => $e->auteur?->nom,

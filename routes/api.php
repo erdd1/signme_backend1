@@ -424,6 +424,7 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
         Route::post('/{uuid}/contributions', [MesGroupesController::class, 'contribuer']);
         Route::get('/{uuid}/mouvements',     [MesGroupesController::class, 'mouvements']);
 
+        Route::get('/{uuid}/membres',                            [MesGroupesController::class, 'membres']);
         Route::post('/{uuid}/entrees-cash',                      [MesGroupesController::class, 'storeEntreeCash']);
         Route::post('/{uuid}/entrees-cash/{entreeUuid}/annuler', [MesGroupesController::class, 'annulerEntreeCash']);
 
