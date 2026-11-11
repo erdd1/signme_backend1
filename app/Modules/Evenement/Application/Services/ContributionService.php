@@ -10,6 +10,8 @@ use App\Models\Evenement;
 use App\Models\PaymentEvent;
 use App\Models\User;
 use App\Modules\Payment\Application\Services\PaymentEventRecorder;
+use App\Modules\Payment\Application\Services\PaymentGatewayRegistry;
+use App\Modules\Payment\Infrastructure\ExternalServices\FlutterwaveGateway;
 use App\Modules\Payment\Infrastructure\ExternalServices\NotchPayGateway;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -36,10 +38,14 @@ class ContributionService
         private readonly NotchPayGateway $notchPayGateway,
         private readonly ContributionPollingDispatcher $contributionPollingDispatcher,
         private readonly PaymentQueueHealthService $paymentQueueHealthService,
+        private readonly FlutterwaveGateway $flutterwaveGateway,
+        private readonly PaymentGatewayRegistry $gateways,
     ) {}
 
     /**
-     * Initie une contribution à un événement (paiement NotchPay : mobile money ou carte).
+     * Initie une contribution à un événement : Mobile Money (NotchPay, PUSH
+     * sur le téléphone) ou carte bancaire (Flutterwave, page de paiement
+     * hébergée dont l'adresse est renvoyée dans payment_metadata.checkout_url).
      *
      * @throws ApiException
      */
@@ -49,6 +55,13 @@ class ContributionService
         // NotchPay : sinon l'utilisateur reçoit le PUSH de paiement mais le
         // serveur ne peut plus suivre sa confirmation (échec silencieux).
         $this->paymentQueueHealthService->ensureAvailable();
+
+        $paymentMethod = $data['paymentMethod'];
+        $isCard = $paymentMethod === Contribution::METHOD_CARD;
+
+        if ($isCard && !config('payment.card.enabled')) {
+            throw ApiException::serviceUnavailable('Le paiement par carte n\'est pas disponible pour le moment.');
+        }
 
         // PostgreSQL valide le FORMAT d'un uuid avant même de comparer et
         // lève une erreur SQL pour une valeur mal formée, ce qui marque
@@ -83,7 +96,9 @@ class ContributionService
 
         $montant = (int) $data['montant'];
         // Recalcule toujours les frais côté serveur : jamais confiance au frontend.
-        $feeData = ContributionFeeCalculatorService::calculateTotal($montant);
+        $feeData = $isCard
+            ? CardFeeCalculatorService::calculateTotal($montant)
+            : ContributionFeeCalculatorService::calculateTotal($montant);
 
         $note = isset($data['note']) ? mb_substr((string) $data['note'], 0, 100) : null;
 
@@ -91,11 +106,10 @@ class ContributionService
         // qu'un seul groupe, sélection obligatoire s'il en a plusieurs.
         $groupeId = $this->resolveGroupeId($user, isset($data['groupeId']) ? (int) $data['groupeId'] : null);
 
-        $paymentMethod = $data['paymentMethod'];
-        $paymentOperator = $data['paymentOperator'] ?? null;
-        $paymentNumber = $data['paymentNumber'] ?? null;
+        $paymentOperator = $isCard ? null : ($data['paymentOperator'] ?? null);
+        $paymentNumber = $isCard ? null : ($data['paymentNumber'] ?? null);
 
-        return DB::transaction(function () use ($user, $evenement, $montant, $feeData, $paymentMethod, $paymentOperator, $paymentNumber, $note, $groupeId) {
+        return DB::transaction(function () use ($user, $evenement, $montant, $feeData, $paymentMethod, $paymentOperator, $paymentNumber, $note, $groupeId, $isCard) {
             $contribution = Contribution::create([
                 'uuid'            => (string) Str::uuid(),
                 'evenementId'     => $evenement->id,
@@ -108,6 +122,7 @@ class ContributionService
                 'paymentOperator' => $paymentOperator,
                 'paymentNumber'   => $paymentNumber,
                 'paymentMethod'   => $paymentMethod,
+                'paymentGateway'  => $isCard ? Contribution::GATEWAY_FLUTTERWAVE : Contribution::GATEWAY_NOTCHPAY,
                 'statut'          => Contribution::STATUT_PENDING,
             ]);
 
@@ -122,14 +137,16 @@ class ContributionService
             $description = "Contribution EEC - {$evenement->titre} - {$user->nom}";
 
             try {
-                $paymentRef = $this->notchPayGateway->initiateMobileMoney(
-                    $contribution->id,
-                    $paymentNumber,
-                    $paymentOperator,
-                    $feeData['total'],
-                    $description,
-                    $user->email,
-                );
+                $paymentRef = $isCard
+                    ? $this->startCardCheckout($contribution, $user, $feeData['total'], $description)
+                    : $this->notchPayGateway->initiateMobileMoney(
+                        $contribution->id,
+                        $paymentNumber,
+                        $paymentOperator,
+                        $feeData['total'],
+                        $description,
+                        $user->email,
+                    );
 
                 $contribution->update(['payment_reference' => $paymentRef]);
 
@@ -215,9 +232,7 @@ class ContributionService
             return;
         }
 
-        $internalStatus = $this->notchPayGateway->mapStatus($rawStatus);
-
-        DB::transaction(function () use ($paymentRef, $internalStatus, $payload) {
+        DB::transaction(function () use ($paymentRef, $rawStatus, $payload) {
             $contribution = Contribution::where('payment_reference', $paymentRef)
                 ->lockForUpdate()
                 ->first();
@@ -231,6 +246,25 @@ class ContributionService
             if (in_array($contribution->statut, [Contribution::STATUT_COMPLETED, Contribution::STATUT_FAILED], true)) {
                 Log::info('Contribution déjà traitée (idempotence)', ['contribution_id' => $contribution->id]);
                 return;
+            }
+
+            $internalStatus = $this->gateways->forContribution($contribution)->mapStatus($rawStatus);
+
+            // Carte : le montant et la devise réellement encaissés doivent
+            // correspondre à ce qui avait été demandé, sinon le paiement est
+            // refusé (jamais d'événement crédité sur un montant inattendu).
+            if ($internalStatus === Contribution::STATUT_COMPLETED
+                && $contribution->paymentGateway === Contribution::GATEWAY_FLUTTERWAVE
+                && !$this->cardPaymentMatches($contribution, $payload)) {
+                $internalStatus = Contribution::STATUT_FAILED;
+                $payload['rejection'] = 'montant ou devise différents de ceux demandés';
+
+                Log::critical('Contribution carte — montant/devise inattendus, paiement refusé', [
+                    'contribution_id' => $contribution->id,
+                    'attendu'         => $contribution->montantTotal,
+                    'recu'            => $payload['amount'] ?? null,
+                    'devise_recue'    => $payload['currency'] ?? null,
+                ]);
             }
 
             $contribution->update([
@@ -289,6 +323,38 @@ class ContributionService
      *
      * @throws ApiException
      */
+    /**
+     * Crée la page de paiement carte et mémorise son adresse (le fidèle
+     * l'ouvre dans le navigateur) ; la référence est le `tx_ref` Flutterwave.
+     */
+    private function startCardCheckout(Contribution $contribution, User $user, int $total, string $description): string
+    {
+        $txRef = 'SIGNME-' . $contribution->uuid;
+
+        $checkoutUrl = $this->flutterwaveGateway->createCheckout(
+            $txRef,
+            $total,
+            route('payment.callback'),
+            $user->email,
+            $user->nom,
+            $description,
+        );
+
+        $contribution->update(['payment_metadata' => ['checkout_url' => $checkoutUrl]]);
+
+        return $txRef;
+    }
+
+    /** @param array<string, mixed> $payload données vérifiées auprès de Flutterwave */
+    private function cardPaymentMatches(Contribution $contribution, array $payload): bool
+    {
+        $amount = $payload['amount'] ?? null;
+
+        return is_numeric($amount)
+            && (int) round((float) $amount) === (int) $contribution->montantTotal
+            && strtoupper((string) ($payload['currency'] ?? '')) === strtoupper((string) config('payment.card.currency'));
+    }
+
     private function resolveGroupeId(User $user, ?int $requestedGroupeId): ?int
     {
         $groupeIds = $user->groupes()->pluck('groupes.id');
