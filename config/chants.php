@@ -36,6 +36,19 @@ return [
         'timeout'  => (int) env('CHANTS_GENIUS_TIMEOUT', 6),
     ],
 
+    // Hub Chants : service SÉPARÉ (autre conteneur, autre base) qui porte
+    // la recherche, les liens de chants, l'historique et les favoris. L'API
+    // principale ne fait que délivrer un jeton signé de courte durée, que le
+    // hub vérifie seul (clé publique) — aucun appel du hub vers l'API principale.
+    // URL vide = hub désactivé (interrupteur : l'app affiche « indisponible »).
+    'hub' => [
+        'url'                  => env('CHANTS_HUB_URL'),
+        'jwt_private_key_path' => env('CHANTS_HUB_JWT_PRIVATE_KEY', storage_path('app/keys/chants_jwt_private.pem')),
+        'token_ttl_minutes'    => (int) env('CHANTS_HUB_TOKEN_TTL', 15),
+        'issuer'               => 'signme-api',
+        'audience'             => 'signme-chants',
+    ],
+
     // Mention affichée sous chaque chant dans l'application.
     'attribution' => [
         'nom' => 'LRCLIB',
