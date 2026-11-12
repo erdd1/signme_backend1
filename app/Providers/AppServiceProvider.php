@@ -225,7 +225,6 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureAuthRouteRateLimiting();
         $this->configureAssistantRateLimiting();
-        $this->configureChantsRateLimiting();
 
         // ─── Macro de réponse API globale ─────────────────────────────────────
         Response::macro('api', function ($data = null, $message = 'Succès', $code = 200) {
@@ -254,18 +253,6 @@ class AppServiceProvider extends ServiceProvider
                     'success' => false,
                     'message' => 'Vous posez vos questions un peu vite. Patientez quelques instants.',
                 ], 429, $headers));
-        });
-    }
-
-    /**
-     * Limite de la remise du jeton du hub Chants : un même utilisateur ne
-     * peut pas le redemander en rafale (la recherche elle-même vit dans le hub).
-     */
-    protected function configureChantsRateLimiting(): void
-    {
-        RateLimiter::for('chants', function (Request $request) {
-            return Limit::perMinute(config('chants.rate_limit_per_minute'))
-                ->by($request->user()?->id ?? $request->ip());
         });
     }
 

@@ -30,7 +30,6 @@ use App\Modules\Retrait\Http\RetraitController;
 use App\Modules\AboutChurch\Http\AboutChurchController;
 use App\Modules\Celebration\Http\CelebrationController;
 use App\Modules\Assistant\Http\AssistantController;
-use App\Modules\Chant\Http\ChantController;
 use App\Modules\Don\Http\DonController;
 use App\Modules\Groupe\Http\MesGroupesController;
 use App\Modules\Transaction\Http\TransactionController;
@@ -393,15 +392,6 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // Aucune conversation stockée : l'app renvoie l'historique à chaque question.
     Route::post('/assistant/chat', [AssistantController::class, 'chat'])
         ->middleware('throttle:assistant');
-
-    // =========================================================================
-    // CLIENT CHANTS (Répertoire de chants — tous rôles)
-    // =========================================================================
-    // La recherche et les liens vivent dans le hub Chants (service séparé) :
-    // ici seulement la remise du jeton d'accès et de l'adresse du hub.
-    Route::prefix('chants')->middleware('throttle:chants')->group(function () {
-        Route::post('/token', [ChantController::class, 'token']);
-    });
 
     // =========================================================================
     // CLIENT DONS (service « Faire un don » hors événement — tous rôles)
