@@ -397,11 +397,10 @@ Route::prefix('v1')->middleware(['auth:sanctum', 'check.actif', 'not.admin'])->g
     // =========================================================================
     // CLIENT CHANTS (Répertoire de chants — tous rôles)
     // =========================================================================
-    // Aucune donnée persistée : recherche en ligne, copies temporaires en cache.
+    // La recherche et les liens vivent dans le hub Chants (service séparé) :
+    // ici seulement la remise du jeton d'accès et de l'adresse du hub.
     Route::prefix('chants')->middleware('throttle:chants')->group(function () {
         Route::post('/token', [ChantController::class, 'token']);
-        Route::get('/search', [ChantController::class, 'search']);
-        Route::get('/{id}',   [ChantController::class, 'show'])->whereNumber('id');
     });
 
     // =========================================================================
